@@ -495,7 +495,7 @@ const [section, setSection] = useState("orders");
   };
 
   return (
-    <div className="min-h-screen bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="min-h-screen flex flex-col bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{FONTS}</style>
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-green-200 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -514,12 +514,6 @@ const [section, setSection] = useState("orders");
               className="text-[11px] px-2.5 py-1 rounded-full bg-green-100 border border-green-300 text-green-800 hover:text-amber-600"
             >
               ← Back to site
-            </button>
-            <button
-              onClick={signOut}
-              className="text-[11px] px-2.5 py-1 rounded-full bg-red-50 border border-red-200 text-red-700 hover:bg-red-100"
-            >
-              Sign out
             </button>
           </div>
         </div>
@@ -543,7 +537,7 @@ const [section, setSection] = useState("orders");
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-6">
+      <main className="w-full max-w-5xl mx-auto px-4 py-6 flex-1">
         {dashboardError && (
           <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <span>{dashboardError}</span>
@@ -1199,6 +1193,14 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
           );
         })()}
       </main>
+      <footer className="flex justify-center px-4 pb-8 pt-2">
+        <button
+          onClick={signOut}
+          className="text-sm px-5 py-2 rounded-full bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors"
+        >
+          Sign out
+        </button>
+      </footer>
     </div>
   );
 }
