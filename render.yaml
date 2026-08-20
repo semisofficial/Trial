@@ -10,7 +10,7 @@ services:
       # Keep API calls first-party so the HttpOnly Admin session cookie works.
       - type: rewrite
         source: /api/*
-        destination: https://api.semiskitchen.in/api/*
+        destination: https://semiskitchenbe.onrender.com/api/*
       - type: rewrite
         source: /invoice/*
         destination: https://api.semiskitchen.in/api/invoices/share/*
@@ -53,7 +53,7 @@ services:
       - key: SESSION_SECRET
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://semiskitchen.in,https://www.semiskitchen.in
+        value: https://semiskitchen.in,https://www.semiskitchen.in,https://semiskitchen.onrender.com
       - key: PUBLIC_SITE_URL
         value: https://semiskitchen.in
       - key: PUBLIC_API_BASE_URL
