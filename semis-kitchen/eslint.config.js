@@ -18,4 +18,9 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // These are intentionally entry/shared modules, not component-only files.
+    files: ['src/main.jsx', 'src/lib/kitchen.jsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])

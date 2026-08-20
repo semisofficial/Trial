@@ -33,22 +33,7 @@ async function updateInventory(id, data) {
   return result.rows[0];
 }
 
-// Atomic, concurrency-safe stock decrement. Uses a single UPDATE so two
-// admins accepting orders at the same time cannot lose updates (no read-then-
-// write race). Stock is clamped at 0.
-async function decrementStock(menuItemId, qty) {
-  const result = await db.query(
-    `UPDATE inventory
-        SET stock = GREATEST(0, stock - $1)
-      WHERE menu_item_id = $2
-      RETURNING *`,
-    [qty, menuItemId]
-  );
-  return result.rows[0];
-}
-
 module.exports = {
   getInventory,
   updateInventory,
-  decrementStock,
 };

@@ -25,6 +25,34 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT false;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_slot TEXT;
 
+-- Inventory is reserved atomically when a new order is created. The flag
+-- makes decline/delete restoration idempotent and prevents double-decrements.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_reserved BOOLEAN NOT NULL DEFAULT false;
+-- Orders accepted by the previous frontend flow already had stock deducted.
+UPDATE orders SET stock_reserved = true WHERE status = 'accepted' AND stock_reserved = false;
+
+-- Separate unguessable capability token for customer-facing invoice links.
+-- Admin sessions can still open invoices without putting this token in a URL.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_share_token TEXT;
+UPDATE orders
+SET invoice_share_token = replace(gen_random_uuid()::text, '-', '')
+WHERE invoice_share_token IS NULL;
+ALTER TABLE orders ALTER COLUMN invoice_share_token SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_invoice_share_token ON orders (invoice_share_token);
+
+-- Database-level integrity guards. Application validation gives friendly
+-- errors; these constraints are the final protection against malformed data.
+ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_stock_nonnegative;
+-- NULL means stock has not been entered yet; it remains unorderable because
+-- order validation treats it as zero. The constraint still forbids negatives.
+ALTER TABLE inventory ADD CONSTRAINT inventory_stock_nonnegative CHECK (stock IS NULL OR stock >= 0);
+ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_price_nonnegative;
+ALTER TABLE inventory ADD CONSTRAINT inventory_price_nonnegative CHECK (selling_price IS NOT NULL AND selling_price >= 0);
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_allowed;
+ALTER TABLE orders ADD CONSTRAINT orders_status_allowed CHECK (status IS NOT NULL AND status IN ('pending', 'accepted', 'declined', 'completed'));
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_payment_status_allowed;
+ALTER TABLE orders ADD CONSTRAINT orders_payment_status_allowed CHECK (payment_status IS NOT NULL AND payment_status IN ('paid', 'unpaid'));
+
 -- Tracks whether (and when) an order's line items were pushed to the
 -- Google Sheet. Previously the sync endpoint re-queried and re-appended
 -- every completed order on every click, producing duplicate rows in the
@@ -35,28 +63,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_slot TEXT;
 -- financial record is confirmed to live on permanently in the sheet.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
 
--- Tracks whether an order's line items have already been pushed to the
--- Google Sheet. Previously the sync endpoint re-fetched and re-appended
--- EVERY completed order on every click, silently creating duplicate rows in
--- the sheet each time "Sync to Sheets" was pressed more than once. Also used
--- to safely identify which paid/archived orders are safe to delete (see
--- deleteSyncedPaidOrders) — an order should never be deleted before its data
--- has actually made it to the sheet.
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ;
-
--- ---------------------------------------------------------------------------
--- LEGACY: realtime_events table from the old SSE notification system.
--- The SSE system was replaced by admin email notifications (utils/emailNotify.js),
--- so this table is no longer used by any code. Kept here (idempotent) only so
--- existing databases don't break; safe to ignore or drop.
--- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS realtime_events (
-  id BIGSERIAL PRIMARY KEY,
-  type TEXT NOT NULL,
-  payload JSONB DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_realtime_events_id ON realtime_events (id);
+-- Remove the table left by the retired SSE notification system. No current
+-- application code reads or writes it, and DROP IF EXISTS is safe on fresh DBs.
+DROP TABLE IF EXISTS realtime_events;
 
 -- ---------------------------------------------------------------------------
 -- Performance indexes (run once on Neon). These speed up the frequent

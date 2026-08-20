@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/invoice/:orderId",
-      "destination": "https://semiskitchenbe.vercel.app/api/invoices/share/:orderId"
+      "destination": "https://api.semiskitchen.in/api/invoices/share/:orderId"
     },
     {
-      "source": "/api/invoices/:path*",
-      "destination": "https://semiskitchenbe.vercel.app/api/invoices/:path*"
+      "source": "/api/:path*",
+      "destination": "https://api.semiskitchen.in/api/:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

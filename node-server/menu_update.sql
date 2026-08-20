@@ -288,3 +288,8 @@ WITH new_item AS (
 )
 INSERT INTO inventory (menu_item_id, selling_price, stock, available)
 SELECT id, 500, 0, true FROM new_item;
+
+-- Piece-based breads/pathiri use quantity minimums, not kilogram units.
+UPDATE menu_items
+SET unit = '1 Piece'
+WHERE category_id = 'mains' AND min_qty IN (10, 20);

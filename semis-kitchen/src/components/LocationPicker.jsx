@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MapPin, LocateFixed, Loader2 } from "lucide-react";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 /* Fix default marker icon path (Vite/Vercel bundling strips the images) */
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -16,33 +17,75 @@ L.Icon.Default.mergeOptions({
 const DEFAULT_CENTER = [10.8505, 76.2711]; // Kerala, India
 const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const GEOCODE_DELAY_MS = 1100;
+const GEOCODE_CACHE_LIMIT = 100;
+const geocodeCache = new Map();
 
 /* Reverse-geocode lat/lng -> readable address using free Nominatim API */
-async function reverseGeocode(lat, lng) {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=17&addressdetails=1`,
-      { headers: { "Accept-Language": "en" } }
-    );
-    if (!res.ok) throw new Error("Geocode failed");
-    const data = await res.json();
-    return data?.display_name || "";
-  } catch {
-    return "";
+async function reverseGeocode(lat, lng, signal) {
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  if (geocodeCache.has(key)) return geocodeCache.get(key);
+
+  const params = new URLSearchParams({
+    format: "jsonv2",
+    lat: String(lat),
+    lon: String(lng),
+    zoom: "17",
+    addressdetails: "1",
+  });
+  const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+    headers: { "Accept-Language": "en" },
+    signal,
+  });
+  if (!res.ok) throw new Error("Geocode failed");
+  const data = await res.json();
+  const address = data?.display_name || "";
+  if (address) {
+    if (geocodeCache.size >= GEOCODE_CACHE_LIMIT) {
+      geocodeCache.delete(geocodeCache.keys().next().value);
+    }
+    geocodeCache.set(key, address);
   }
+  return address;
 }
 
 export default function LocationPicker({ value, onChange, initial = DEFAULT_CENTER }) {
   const mapRef = useRef(null);
   const markerRef = useRef(null);
   const mapElRef = useRef(null);
-  const [addr, setAddr] = useState(value?.address || "");
+  const geocodeTimerRef = useRef(null);
+  const geocodeAbortRef = useRef(null);
+  const geocodeRequestRef = useRef(0);
+  const onChangeRef = useRef(onChange);
   const [locating, setLocating] = useState(false);
 
-  // Apply external changes (e.g. "Use my location" reverse-geocoded after state set)
   useEffect(() => {
-    if (value?.address) setAddr(value.address);
-  }, [value?.address]);
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const selectLocation = (lat, lng) => {
+    // Save the coordinates immediately, but wait until movement stops before
+    // sharing them with the external address-lookup service.
+    onChangeRef.current({ lat, lng });
+    clearTimeout(geocodeTimerRef.current);
+    geocodeAbortRef.current?.abort();
+    const requestId = ++geocodeRequestRef.current;
+
+    geocodeTimerRef.current = setTimeout(async () => {
+      const controller = new AbortController();
+      geocodeAbortRef.current = controller;
+      try {
+        const address = await reverseGeocode(lat, lng, controller.signal);
+        if (requestId !== geocodeRequestRef.current || !address) return;
+        onChangeRef.current({ lat, lng, address });
+      } catch (err) {
+        if (err?.name !== "AbortError") {
+          // Coordinates and the editable address field still remain usable.
+          console.warn("Address lookup unavailable");
+        }
+      }
+    }, GEOCODE_DELAY_MS);
+  };
 
   // Init map once
   useEffect(() => {
@@ -65,16 +108,13 @@ export default function LocationPicker({ value, onChange, initial = DEFAULT_CENT
 
     const marker = L.marker([startLat, startLng], { icon, draggable: true }).addTo(map);
 
-    const emit = async (latlng) => {
-      const address = await reverseGeocode(latlng.lat, latlng.lng);
-      setAddr(address);
-      onChange({ lat: latlng.lat, lng: latlng.lng, address });
-    };
-
-    marker.on("dragend", (e) => emit(e.target.getLatLng()));
+    marker.on("dragend", (e) => {
+      const point = e.target.getLatLng();
+      selectLocation(point.lat, point.lng);
+    });
     map.on("click", (e) => {
       marker.setLatLng(e.latlng);
-      emit(e.latlng);
+      selectLocation(e.latlng.lat, e.latlng.lng);
     });
 
     mapRef.current = map;
@@ -82,6 +122,8 @@ export default function LocationPicker({ value, onChange, initial = DEFAULT_CENT
 
     return () => {
       map.remove();
+      clearTimeout(geocodeTimerRef.current);
+      geocodeAbortRef.current?.abort();
       mapRef.current = null;
       markerRef.current = null;
     };
@@ -98,9 +140,7 @@ export default function LocationPicker({ value, onChange, initial = DEFAULT_CENT
       async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        const address = await reverseGeocode(lat, lng);
-        setAddr(address);
-        onChange({ lat, lng, address });
+        selectLocation(lat, lng);
         if (mapRef.current && markerRef.current) {
           mapRef.current.setView([lat, lng], 16);
           markerRef.current.setLatLng([lat, lng]);
@@ -142,9 +182,8 @@ export default function LocationPicker({ value, onChange, initial = DEFAULT_CENT
       <div className="px-3.5 py-3 space-y-1.5">
         <label className="text-xs text-[#6F6657]">Delivery address (auto-filled from pin)</label>
         <textarea
-          value={addr}
+          value={value?.address || ""}
           onChange={(e) => {
-            setAddr(e.target.value);
             onChange({ ...(value || {}), address: e.target.value });
           }}
           rows={2}
@@ -156,6 +195,9 @@ export default function LocationPicker({ value, onChange, initial = DEFAULT_CENT
             Lat: {value.lat.toFixed(6)}, Lng: {value.lng.toFixed(6)}
           </p>
         )}
+        <p className="text-[10px] leading-relaxed text-[#8A806F]">
+          OpenStreetMap services receive the selected map area and coordinates to display the map and look up an address.
+        </p>
       </div>
     </div>
   );

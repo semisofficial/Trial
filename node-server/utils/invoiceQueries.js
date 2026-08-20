@@ -35,13 +35,21 @@ const SINGLE_ORDER_QUERY = `
   JOIN customers c ON o.customer_id = c.id
   JOIN order_items oi ON o.id = oi.order_id
   JOIN menu_items mi ON mi.id = oi.menu_item_id
-  WHERE o.id = $1;
+  WHERE o.id = $1
+    AND ($2::text IS NULL OR o.invoice_share_token = $2);
 `;
 
 // Batch version — every accepted order's line items in one result set.
 // groupOrders() in invoiceGenerator.js splits this back into one object
 // per order (use this for a "generate all accepted invoices" job).
 const ACCEPTED_ORDERS_QUERY = `
+  WITH selected_orders AS (
+    SELECT id
+    FROM orders
+    WHERE status = 'accepted'
+    ORDER BY created_at, id
+    LIMIT $1 OFFSET $2
+  )
   SELECT
     o.invoice_id,
     o.id AS order_id,
@@ -60,11 +68,17 @@ const ACCEPTED_ORDERS_QUERY = `
     o.paymet AS payment_method
 
   FROM orders o
+  JOIN selected_orders selected ON selected.id = o.id
   JOIN customers c ON o.customer_id = c.id
   JOIN order_items oi ON o.id = oi.order_id
   JOIN menu_items mi ON mi.id = oi.menu_item_id
-  WHERE o.status = 'accepted'
   ORDER BY o.id;
+`;
+
+const ACCEPTED_ORDERS_COUNT_QUERY = `
+  SELECT count(*)::integer AS total
+  FROM orders
+  WHERE status = 'accepted';
 `;
 
 // Used only by the Google Sheet sync — targets 'completed' orders instead of
@@ -101,4 +115,4 @@ const COMPLETED_ORDERS_QUERY = `
   ORDER BY o.id;
 `;
 
-module.exports = { SINGLE_ORDER_QUERY, ACCEPTED_ORDERS_QUERY, COMPLETED_ORDERS_QUERY };
+module.exports = { SINGLE_ORDER_QUERY, ACCEPTED_ORDERS_QUERY, ACCEPTED_ORDERS_COUNT_QUERY, COMPLETED_ORDERS_QUERY };

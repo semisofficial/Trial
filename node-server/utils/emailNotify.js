@@ -6,21 +6,23 @@
 //
 // Configuration lives in env variables (never hardcoded):
 //   RESEND_API_KEY  -> your Resend API key (required to send)
-//   RESEND_FROM     -> sender address (default: onboarding@resend.dev)
-//   ADMIN_EMAIL     -> recipient (default: semisofficial1@gmail.com)
+//   RESEND_FROM     -> verified sender address (required)
+//   ADMIN_EMAIL     -> recipient owned by the restaurant (required)
 const { Resend } = require("resend");
 
 async function sendNewOrderNotification() {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn("⚠️ RESEND_API_KEY is not set — skipped admin email notification");
+  const from = process.env.RESEND_FROM;
+  const recipient = process.env.ADMIN_EMAIL;
+  if (!apiKey || !from || !recipient) {
+    console.warn("Admin email notification is not fully configured; notification skipped");
     return null;
   }
 
   const resend = new Resend(apiKey);
   return resend.emails.send({
-    from: process.env.RESEND_FROM || "onboarding@resend.dev",
-    to: process.env.ADMIN_EMAIL || "semisofficial1@gmail.com",
+    from,
+    to: recipient,
     subject: "🛎️ New order received",
     html: "<p>A new order has just arrived at <strong>Semi's Kitchen</strong>.</p><p>Please check your admin dashboard to review it.</p>",
   });

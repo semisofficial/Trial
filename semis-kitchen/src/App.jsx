@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react";
 import {
   ShoppingBag,
   Plus,
@@ -11,15 +11,13 @@ import {
   FONTS,
   CATS,
   rupee,
-  genId,
-  genInvoiceId,
   resolveImg,
   loadMenu,
   loadMenuStored,
-  loadInventory,
   createOrder,
 } from "./lib/kitchen.jsx";
-import LocationPicker from "./components/LocationPicker.jsx";
+
+const LocationPicker = lazy(() => import("./components/LocationPicker.jsx"));
 
 /* ---------------------------------------------------------
    Delivery time slots: hourly ranges from 11 AM to 9 PM.
@@ -49,7 +47,7 @@ const IS_IOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navig
 /* ---------------------------------------------------------
    Customer: Menu + Cart + Checkout
 --------------------------------------------------------- */
-function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
+function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
   const [tab, setTab] = useState("fried");
   const [cart, setCart] = useState({});
   const [cartOpen, setCartOpen] = useState(false);
@@ -60,6 +58,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
   const [errorMsg, setErrorMsg] = useState("");
   const [stockError, setStockError] = useState(null);
   const [slide, setSlide] = useState(0);
+  const [previousSlide, setPreviousSlide] = useState(null);
 
   const menuSlides = useMemo(
     () => {
@@ -75,34 +74,37 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
     [menu]
   );
   const heroCount = menuSlides.length;
+  const activeSlide = heroCount > 0 ? slide % heroCount : 0;
   useEffect(() => {
     if (heroCount <= 1) return;
-    const t = setInterval(() => {
-      setSlide((current) => {
-        let next = current;
-        while (next === current) next = Math.floor(Math.random() * heroCount);
-        return next;
-      });
-    }, 5000);
-    return () => clearInterval(t);
-  }, [heroCount]);
+    let next = activeSlide;
+    while (next === activeSlide) next = Math.floor(Math.random() * heroCount);
 
-  useEffect(() => {
-    if (slide >= heroCount) setSlide(0);
-  }, [heroCount, slide]);
+    // Download only the upcoming slide, instead of mounting every menu photo
+    // at zero opacity and making the browser fetch the entire catalog.
+    const preload = new Image();
+    preload.src = menuSlides[next].src;
+
+    const timer = setTimeout(() => {
+      setPreviousSlide(activeSlide);
+      setSlide(next);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [activeSlide, heroCount, menuSlides]);
 
   const isAvailable = (id) => inventory[id]?.available !== false;
 
   // Effective price: prefer admin override stored in inventory, else MENU price
   const priceOf = (item) => (inventory[item.id]?.price != null ? inventory[item.id].price : item.price);
-  // Inventory normally comes from /api/inventory. The menu endpoint also
-  // includes stock, so use it as a fallback while inventory is still loading.
+  // The public menu response includes the current inventory overlay. Admin
+  // inventory management still uses its dedicated protected mutation route.
   const stockOf = (item) => {
     const stock = Number(inventory[item.id]?.stock ?? item.stock);
     return Number.isFinite(stock) && stock >= 0 ? stock : null;
   };
 
   const addItem = (item) => {
+    if (!liveReady) return;
     if (!isAvailable(item.id)) return;
     const step = item.step || 1;
     const minQty = item.minQty || step;
@@ -149,6 +151,10 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
   });
 
   const submitOrder = async () => {
+    if (!liveReady) {
+      setErrorMsg("Please wait while we confirm current prices and availability.");
+      return;
+    }
     if (overstockedLine) {
       setStockError(overstockedLine.id);
       setErrorMsg(`Insufficient stock for ${overstockedLine.name}. Only ${stockOf(overstockedLine)} available.`);
@@ -165,10 +171,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
       return;
     setSubmitting(true);
     const order = {
-      id: genId(),
-      invoiceId: genInvoiceId(),
-      items: cartLines.map((l) => ({ id: l.id, name: l.name, price: l.price, qty: l.qty })),
-      total: cartTotal,
+      items: cartLines.map((l) => ({ id: l.id, qty: l.qty })),
       customer: {
         name: form.name.trim(),
         phone: form.phone.trim(),
@@ -180,15 +183,21 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
         deliveryDate: form.deliveryDate,
         deliverySlot: form.deliverySlot,
       },
-      status: "pending",
-      createdAt: Date.now(),
     };
     try {
-      await createOrder(order);
+      const created = await createOrder(order);
+      order.id = created.id;
+      order.invoiceId = created.invoice_id;
+      order.total = Number(created.total);
+      order.items = created.items;
+      order.status = created.status;
+      order.createdAt = new Date(created.created_at).getTime();
     } catch (err) {
       console.error("Failed to place order:", err);
       setSubmitting(false);
-      setErrorMsg("Sorry, we couldn't place your order. Please check your connection and try again.");
+      setErrorMsg([400, 409, 429, 503].includes(err.status)
+        ? err.message
+        : "Sorry, we couldn't place your order. Please check your details or connection and try again.");
       return;
     }
     setSubmitting(false);
@@ -205,20 +214,20 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
   const itemsForTab = useMemo(() => menu.filter((m) => m.cat === tab), [menu, tab]);
 
   return (
-    <div className="customer-editorial min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "'Work Sans', sans-serif" }}>
-      <style>{FONTS}</style>
+    <div className="customer-editorial min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
+      <style>{`${FONTS}\n@keyframes heroCrossfade { from { opacity: 0; } to { opacity: 1; } }\n@media (prefers-reduced-motion: reduce) { .hero-slide-enter { animation: none !important; } }`}</style>
 
       {/* Hero */}
       <header className="relative overflow-hidden bg-[#F6EDD7]">
         <nav className="relative z-10 w-full px-5 sm:px-8 py-5 flex items-center justify-center text-center bg-[#6F6F32] shadow-[0_8px_24px_rgba(63,59,36,0.12)]">
-          <a href="#top" className="text-2xl sm:text-3xl text-[#FFF8E8]" style={{ fontFamily: "'Fraunces', serif", fontWeight: 700 }}>
+          <a href="#top" className="text-2xl sm:text-3xl text-[#FFF8E8]" style={{ fontFamily: "var(--font-serif)", fontWeight: 700 }}>
             SEMI'S KITCHEN
           </a>
         </nav>
 
         <div id="top" className="relative max-w-6xl mx-auto px-5 sm:px-8 pt-6 pb-16 sm:pt-12 sm:pb-24 grid lg:grid-cols-[0.95fr_1.05fr] gap-12 lg:gap-16 items-center">
           <div className="relative z-10 text-center lg:text-left">
-            <h1 className="text-[2.75rem] leading-[1.02] sm:text-6xl lg:text-7xl text-[#3F3B24] tracking-[-0.035em]" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>
+            <h1 className="text-[2.75rem] leading-[1.02] sm:text-6xl lg:text-7xl text-[#3F3B24] tracking-[-0.035em]" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>
               Authentic Malabar food, made with a little more love.
             </h1>
             <p className="mt-6 max-w-xl mx-auto lg:mx-0 text-[#6F6657] text-base sm:text-lg leading-relaxed">
@@ -229,9 +238,31 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
           <div className="relative mx-auto w-[84%] sm:w-full max-w-[600px]">
             <div className="absolute -inset-3 sm:-inset-8 bg-[#D99168] rounded-[42%_58%_55%_45%/48%_42%_58%_52%] rotate-[-4deg]" />
             <div className="relative aspect-[4/3] sm:aspect-[5/4] overflow-hidden rounded-[38%_62%_52%_48%/45%_40%_60%_55%] shadow-[0_24px_60px_rgba(63,59,36,0.22)]">
-              {menuSlides.length > 0 ? menuSlides.map((item, i) => (
-                <img key={`${item.src}-${i}`} src={item.src} alt={i === slide ? item.name : ""} aria-hidden={i !== slide} className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === slide ? "opacity-100" : "opacity-0"}`} />
-              )) : (
+              {menuSlides.length > 0 ? (
+                <>
+                  {previousSlide !== null && menuSlides[previousSlide] && previousSlide !== activeSlide && (
+                    <img
+                      key={`previous-${menuSlides[previousSlide].src}`}
+                      src={menuSlides[previousSlide].src}
+                      alt=""
+                      aria-hidden="true"
+                      decoding="async"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  )}
+                  <img
+                    key={menuSlides[activeSlide].src}
+                    src={menuSlides[activeSlide].src}
+                    alt={menuSlides[activeSlide].name}
+                    loading="eager"
+                    fetchPriority="high"
+                    decoding="async"
+                    className="hero-slide-enter absolute inset-0 w-full h-full object-cover"
+                    style={{ animation: "heroCrossfade 900ms ease-in-out both" }}
+                    onAnimationEnd={() => setPreviousSlide(null)}
+                  />
+                </>
+              ) : (
                 <div className="w-full h-full bg-[#E8D7B5]" />
               )}
             </div>
@@ -266,6 +297,17 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
           <p className="mb-6 text-sm text-[#7D4A32] bg-[#D99168]/15 border border-[#C8754F]/25 rounded-2xl px-4 py-3 text-center">
             Please note: same-day delivery is not available for Biriyani &amp; Curry items.
           </p>
+        )}
+        {menuState === "stale" && (
+          <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">
+            Live updates are temporarily unavailable. The saved menu is available to browse, but ordering is paused until prices and stock are confirmed.
+            <button onClick={onRetryMenu} className="ml-2 underline font-semibold">Retry</button>
+          </div>
+        )}
+        {!liveReady && menuState !== "stale" && (
+          <div className="mb-5 rounded-xl border border-[#E8D7B5] bg-[#FFFCF3] px-4 py-3 text-center text-sm text-[#6F6657]" role="status">
+            Checking current prices and availability… You can browse while we refresh.
+          </div>
         )}
         {/* Menu grid — skeleton while the first load is in flight, a friendly
             offline message (with retry) if it failed, else the real items. */}
@@ -314,6 +356,8 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
                   <img
                     src={resolveImg(item.img)}
                     alt={item.name}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
                     onError={(e) => {
                       e.target.style.display = "none";
@@ -326,13 +370,17 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
                 </div>
                 <div className="p-4 flex items-center justify-between gap-3">
                   <div>
-                  <div className="text-lg text-[#3F3B24]" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>
+                  <div className="text-lg text-[#3F3B24]" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>
                       {item.name}
                       <span className="text-stone-500 text-xs ml-1.5">{item.unit}</span>
                     </div>
                     <div className="text-[#C8754F] text-sm font-semibold mt-1">
                       {rupee(priceOf(item))}
-                      {item.minQty > 1 && <span className="text-stone-500 text-xs ml-1.5">· min {item.minQty}</span>}
+                      {item.minQty > 1 && (
+                        <span className="text-stone-500 text-xs ml-1.5">
+                          · min {item.minQty}{/piece/i.test(item.unit) ? " pieces" : ""}
+                        </span>
+                      )}
                       {item.seasonal && <span className="text-stone-500 text-xs ml-1.5">· seasonal price</span>}
                     </div>
                     {!available && <div className="text-red-400 text-xs mt-1 font-medium">Sold out today</div>}
@@ -342,7 +390,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
                       </div>
                     )}
                   </div>
-                  {available ? (
+                  {liveReady && available ? (
                     qty > 0 ? (
                       <div className="flex items-center gap-2 bg-green-950 rounded-lg border border-green-800 px-1 py-1 shrink-0">
                         <button onClick={() => decItem(item.id, item)} className="w-7 h-7 flex items-center justify-center text-stone-300 hover:text-amber-300">
@@ -361,8 +409,10 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
                         Add
                       </button>
                     )
-                  ) : (
+                  ) : liveReady ? (
                     <div className="shrink-0 px-3.5 py-1.5 rounded-lg bg-green-800 text-stone-500 text-sm font-semibold">Sold out</div>
+                  ) : (
+                    <div className="shrink-0 px-3.5 py-1.5 rounded-lg bg-[#E8D7B5] text-[#6F6657] text-xs font-semibold">Checking…</div>
                   )}
                 </div>
               </div>
@@ -389,7 +439,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
           <div className="absolute inset-0 bg-black/60" onClick={() => setCartOpen(false)} />
           <div className="relative w-full sm:w-[420px] bg-green-950 border-l border-green-900 h-full flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-green-900">
-              <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "'Fraunces', serif" }}>Your order</h2>
+              <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Your order</h2>
               <button onClick={() => setCartOpen(false)}><X className="w-5 h-5 text-stone-400" /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
@@ -447,7 +497,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
           <div className="absolute inset-0 bg-black/60" onClick={() => setCheckoutOpen(false)} />
           <div className="relative bg-green-950 border border-green-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "'Fraunces', serif" }}>Delivery details</h2>
+              <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Delivery details</h2>
               <button onClick={() => setCheckoutOpen(false)}><X className="w-5 h-5 text-stone-400" /></button>
             </div>
             <div className="flex gap-2 mb-4">
@@ -506,15 +556,23 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
                 className="w-full bg-green-900/60 border border-green-800 rounded-lg px-3.5 py-2.5 text-sm text-stone-100 placeholder-stone-500 focus:outline-none focus:ring-2 focus:ring-amber-400"
               />
               {form.mode === "Delivery" && (
-                <LocationPicker
-                  value={form.location}
-                  onChange={(loc) =>
-                    setForm((f) => {
-                      const merged = { ...(f.location || {}), ...loc };
-                      return { ...f, location: merged, address: merged.address || f.address };
-                    })
-                  }
-                />
+                <Suspense
+                  fallback={(
+                    <div className="h-80 rounded-xl border border-green-800 bg-green-900/40 flex items-center justify-center text-sm text-stone-400">
+                      Loading delivery map…
+                    </div>
+                  )}
+                >
+                  <LocationPicker
+                    value={form.location}
+                    onChange={(loc) =>
+                      setForm((f) => {
+                        const merged = { ...(f.location || {}), ...loc };
+                        return { ...f, location: merged, address: merged.address || f.address };
+                      })
+                    }
+                  />
+                </Suspense>
               )}
               <div>
                 <label className="text-xs text-stone-400 mb-1.5 block">When should the order arrive?</label>
@@ -569,6 +627,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
             <button
               disabled={
                 submitting ||
+                !liveReady ||
                 !form.name.trim() ||
                 !form.phone.trim() ||
                 !form.deliveryDate ||
@@ -588,7 +647,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
       <footer className="relative bg-[#3F3B24] text-[#FFF8E8] px-5 pt-16 pb-10 text-center overflow-hidden">
         <div className="absolute -top-8 left-[-5%] w-[110%] h-16 bg-[#FFF8E8] rounded-[50%]" aria-hidden="true" />
         <div className="relative">
-          <div className="text-3xl mb-2" style={{ fontFamily: "'Fraunces', serif", fontWeight: 600 }}>Semi's Kitchen</div>
+          <div className="text-3xl mb-2" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>Semi's Kitchen</div>
           <p className="text-[#E8D7B5] text-sm">Malabar snacks &amp; curries, made to order</p>
           <p className="mt-8 text-xs text-[#E8D7B5]/55">Built by <span className="font-semibold tracking-[0.16em]">QOZYD</span></p>
         </div>
@@ -602,7 +661,7 @@ function CustomerApp({ menu, inventory, menuState, onRetryMenu }) {
             <div className="w-14 h-14 rounded-full bg-amber-400 flex items-center justify-center mx-auto mb-4">
               <Check className="w-7 h-7 text-green-950" />
             </div>
-            <h2 className="text-xl font-semibold text-stone-50 mb-1" style={{ fontFamily: "'Fraunces', serif" }}>Order sent!</h2>
+            <h2 className="text-xl font-semibold text-stone-50 mb-1" style={{ fontFamily: "var(--font-serif)" }}>Order sent!</h2>
             <p className="text-stone-400 text-sm mb-4">We'll confirm on WhatsApp/call shortly. Keep these IDs for your reference.</p>
             <div className="bg-green-900/60 border border-green-800 rounded-lg py-2.5 text-amber-300 font-mono tracking-wider text-sm mb-2">
               {confirmedOrder.id}
@@ -633,33 +692,46 @@ export default function App() {
   // on the very first visit (no cache yet), same as before.
   const [menu, setMenu] = useState(() => loadMenuStored());
   const [inventory, setInventory] = useState({});
+  const [liveReady, setLiveReady] = useState(false);
   // "ready" if a cached catalog is already onscreen to show, else "loading".
   // Only the very first visit (no cache yet) ever shows the loading skeleton;
   // returning visitors start "ready" and the live refresh just updates in place.
   const [menuState, setMenuState] = useState(() => (menu.length ? "ready" : "loading"));
 
   const refreshMenu = useCallback(async () => {
+    setLiveReady(false);
     setMenuState("loading");
     try {
-      setMenu(await loadMenu());
+      const liveMenu = await loadMenu();
+      setMenu(liveMenu);
+      setInventory(Object.fromEntries(liveMenu.map((item) => [item.id, {
+        stock: item.stock,
+        available: item.available,
+        price: item.price,
+      }])));
+      setLiveReady(true);
       setMenuState("ready");
     } catch {
-      // No cached catalog and the backend is unreachable — show a friendly
-      // offline message with a retry instead of a blank grid.
-      setMenuState("error");
+      setLiveReady(false);
+      setMenu((current) => {
+        setMenuState(current.length ? "stale" : "error");
+        return current;
+      });
     }
   }, []);
-  const refreshInventory = useCallback(async () => setInventory(await loadInventory()), []);
   useEffect(() => {
-    refreshMenu();
-    refreshInventory();
-  }, [refreshMenu, refreshInventory]);
+    const timer = setTimeout(() => {
+      refreshMenu();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [refreshMenu]);
 
   return (
     <CustomerApp
       menu={menu}
       inventory={inventory}
       menuState={menuState}
+      liveReady={liveReady}
       onRetryMenu={() => refreshMenu()}
     />
   );

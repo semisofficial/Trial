@@ -20,7 +20,6 @@ import {
   FONTS,
   CATS,
   STATUS,
-  ADMIN_CODE,
   Logo,
   StatusPill,
   rupee,
@@ -31,64 +30,32 @@ import {
   fetchArchivedOrders,
   archiveOrdersApi,
   deletePaidSyncedOrdersApi,
-decrementStockApi,
   updateOrderStatusApi,
   updatePaymentStatusApi,
-  fetchSalesSummary,
   paymentMethodLabel,
   deliverySlotLabel,
   deliveryDateLabel,
   downloadInvoice,
   shareInvoiceOnWhatsApp,
-  downloadAllInvoices,
+  fetchInvoiceBatchInfo,
+  downloadInvoiceBatch,
   syncToSheets,
+  adminLogin,
+  checkAdminSession,
+  adminLogout,
 } from "./lib/kitchen.jsx";
-
-/* ---------------------------------------------------------
-   Admin session persistence: once unlocked, remember it in
-   sessionStorage (cleared when the browser tab/window closes,
-   unlike localStorage) so a page refresh doesn't ask for the
-   passcode again. A random token + expiry means a stale/tampered
-   value left over in storage can't unlock the app on its own —
-   it still has to match what tryUnlock() wrote. Note this is a
-   client-side UX gate only: the admin API endpoints themselves
-   don't check this token, the same as before.
---------------------------------------------------------- */
-const ADMIN_SESSION_KEY = "semis_admin_session";
-const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-
-function readAdminSession() {
-  try {
-    const raw = sessionStorage.getItem(ADMIN_SESSION_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw);
-    if (!session?.token || !session?.expiresAt || Date.now() > session.expiresAt) {
-      sessionStorage.removeItem(ADMIN_SESSION_KEY);
-      return null;
-    }
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-function writeAdminSession() {
-  const token = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const session = { token, expiresAt: Date.now() + ADMIN_SESSION_TTL_MS };
-  try {
-    sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
-  } catch {}
-  return session;
-}
 
 /* ---------------------------------------------------------
    Admin dashboard (secret route /nashi)
 --------------------------------------------------------- */
 export default function Admin() {
   const navigate = useNavigate();
-  const [unlocked, setUnlocked] = useState(() => !!readAdminSession());
+  const [unlocked, setUnlocked] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [loginPending, setLoginPending] = useState(false);
   const [code, setCode] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState("");
+  const [dashboardError, setDashboardError] = useState("");
   const [tab, setTab] = useState("pending");
 const [section, setSection] = useState("orders");
   const [invoiceGroup, setInvoiceGroup] = useState("recent"); // recent | day | week
@@ -99,7 +66,6 @@ const [section, setSection] = useState("orders");
   const [invSearch, setInvSearch] = useState("");
   // Sub-tabs within the invoices & sales sections
   const [invSub, setInvSub] = useState("list"); // list | payments
-  const [salesSub, setSalesSub] = useState("stats"); // stats | payments
   // Payments sub-tab (paid / unpaid)
   const [payTab, setPayTab] = useState("unpaid"); // paid | unpaid
 
@@ -107,9 +73,10 @@ const [section, setSection] = useState("orders");
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
   const [archived, setArchived] = useState([]);
-  const [salesSummary, setSalesSummary] = useState([]);
   const [priceDraft, setPriceDraft] = useState({});
   const [stockDraft, setStockDraft] = useState({});
+  const [invoiceBatchInfo, setInvoiceBatchInfo] = useState({ totalInvoices: 0, batchSize: 3, totalBatches: 0 });
+  const [downloadingBatch, setDownloadingBatch] = useState(null);
 
   const refreshMenu = useCallback(async () => setMenu(await loadMenu()), []);
   const refreshInventory = useCallback(async () => setInventory(await loadInventory()), []);
@@ -123,36 +90,75 @@ const [section, setSection] = useState("orders");
     setOrders(fetched.map((o) => (O[o.id] ? { ...o, status: O[o.id] } : o)));
   }, []);
   const refreshArchived = useCallback(async () => setArchived(await fetchArchivedOrders()), []);
-  const refreshSales = useCallback(async () => setSalesSummary(await fetchSalesSummary()), []);
+  const refreshBatchInfo = useCallback(async () => {
+    try {
+      setInvoiceBatchInfo(await fetchInvoiceBatchInfo());
+    } catch {
+      setInvoiceBatchInfo({ totalInvoices: 0, batchSize: 3, totalBatches: 0 });
+    }
+  }, []);
 
   useEffect(() => {
-    refreshMenu();
-    refreshArchived();
-    refreshInventory();
-    refreshOrders();
-    refreshSales();
-  }, [refreshMenu, refreshArchived, refreshInventory, refreshOrders, refreshSales]);
+    checkAdminSession()
+      .then(setUnlocked)
+      .catch((err) => setError(err.message || "Staff service is temporarily unavailable"))
+      .finally(() => setAuthChecking(false));
+    const lock = () => setUnlocked(false);
+    const showApiError = (event) => setDashboardError(event.detail?.message || "The request failed");
+    window.addEventListener("semis-admin-unauthorized", lock);
+    window.addEventListener("semis-api-error", showApiError);
+    return () => {
+      window.removeEventListener("semis-admin-unauthorized", lock);
+      window.removeEventListener("semis-api-error", showApiError);
+    };
+  }, []);
 
-  const refreshAll = () => {
-    refreshMenu();
-    refreshArchived();
-    refreshInventory();
-    refreshOrders();
-    refreshSales();
+  useEffect(() => {
+    if (!unlocked) return;
+    const timer = setTimeout(() => {
+      Promise.allSettled([
+        refreshMenu(), refreshArchived(), refreshInventory(),
+        refreshOrders(), refreshBatchInfo(),
+      ]);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [unlocked, refreshMenu, refreshArchived, refreshInventory, refreshOrders, refreshBatchInfo]);
+
+  const refreshAll = async () => {
+    setDashboardError("");
+    await Promise.allSettled([
+      refreshMenu(), refreshArchived(), refreshInventory(),
+      refreshOrders(), refreshBatchInfo(),
+    ]);
   };
 
-  const tryUnlock = () => {
-    if (code === ADMIN_CODE) {
-      writeAdminSession();
+  const tryUnlock = async () => {
+    if (!code || loginPending) return;
+    setLoginPending(true);
+    setError("");
+    try {
+      await adminLogin(code);
       setUnlocked(true);
-      setError(false);
-    } else {
-      setError(true);
+      setCode("");
+    } catch (err) {
+      setError(err.message || "Unable to sign in");
+    } finally {
+      setLoginPending(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await adminLogout();
+    } finally {
+      setUnlocked(false);
+      setCode("");
     }
   };
 
   const setOrderStatus = async (id, status) => {
     const order = orders.find((o) => o.id === id);
+    let committed = false;
     // Register the in-flight override so a stale refresh can't clobber the
     // optimistic status back to pending while the request is in progress.
     orderStatusOverrideRef.current = { ...orderStatusOverrideRef.current, [id]: status };
@@ -160,20 +166,7 @@ const [section, setSection] = useState("orders");
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
     try {
       await updateOrderStatusApi(id, status);
-
-      // When accepting an order, decrement stock for each item. This uses an
-      // atomic server-side decrement (single UPDATE), so concurrent accepts
-      // from multiple admins never lose updates (no read-modify-write race).
-      if (status === "accepted" && order) {
-        for (const i of order.items || []) {
-          setInventory((prevInv) => {
-            const cur = prevInv[i.id];
-            if (!cur) return prevInv;
-            return { ...prevInv, [i.id]: { ...cur, stock: Math.max(0, (cur.stock || 0) - i.qty) } };
-          });
-          await decrementStockApi(i.id, i.qty);
-        }
-      }
+      committed = true;
 
       // Status change committed to the DB — drop the override so the next
       // refresh reflects authoritative server state, then re-sync to converge.
@@ -181,12 +174,17 @@ const [section, setSection] = useState("orders");
       delete O[id];
       orderStatusOverrideRef.current = O;
       await refreshOrders();
-    } catch (err) {
-      // Revert on failure
+      await refreshInventory();
+      await refreshBatchInfo();
+    } catch {
       const O = { ...orderStatusOverrideRef.current };
       delete O[id];
       orderStatusOverrideRef.current = O;
-      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: order.status } : o)));
+      // Revert only when the mutation itself failed. If a later refresh failed,
+      // the server change is already authoritative and must remain visible.
+      if (!committed && order) {
+        setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: order.status } : o)));
+      }
     }
   };
 
@@ -210,7 +208,7 @@ const [section, setSection] = useState("orders");
 
     try {
       await updatePaymentStatusApi(id, next);
-    } catch (err) {
+    } catch {
       // Revert on failure
       setOrders((p) => p.map(revert));
       setArchived((p) => p.map(revert));
@@ -224,7 +222,7 @@ const [section, setSection] = useState("orders");
     setInventory((prev) => ({ ...prev, [itemId]: { ...prev[itemId], available: !wasAvailable } }));
     try {
       await updateInventoryField(itemId, { available: !wasAvailable });
-    } catch (err) {
+    } catch {
       setInventory((prev) => ({ ...prev, [itemId]: { ...prev[itemId], available: wasAvailable } }));
     }
   };
@@ -238,7 +236,7 @@ const [section, setSection] = useState("orders");
     setInventory((prev) => ({ ...prev, [itemId]: { ...prev[itemId], price } }));
     try {
       await updateInventoryField(itemId, { price });
-    } catch (err) {
+    } catch {
       setInventory((prev) => ({ ...prev, [itemId]: { ...prev[itemId], price: currentPriceOf(itemId) } }));
     }
     setPriceDraft((d) => {
@@ -285,27 +283,31 @@ const [section, setSection] = useState("orders");
     await refreshOrders();
   };
 
+  if (authChecking) {
+    return <div className="min-h-screen bg-green-100 flex items-center justify-center text-green-800">Checking staff session...</div>;
+  }
+
   if (!unlocked) {
     return (
-      <div className="min-h-screen bg-green-100 flex items-center justify-center p-4" style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      <div className="min-h-screen bg-green-100 flex items-center justify-center p-4" style={{ fontFamily: "var(--font-sans)" }}>
         <style>{FONTS}</style>
         <div className="w-full max-w-xs text-center">
           <div className="w-12 h-12 rounded-full bg-amber-400 flex items-center justify-center mx-auto mb-4">
             <Lock className="w-6 h-6 text-green-950" />
           </div>
-          <h1 className="text-green-950 text-lg font-semibold mb-1" style={{ fontFamily: "'Fraunces', serif" }}>Staff access</h1>
+          <h1 className="text-green-950 text-lg font-semibold mb-1" style={{ fontFamily: "var(--font-serif)" }}>Staff access</h1>
           <p className="text-green-800/70 text-sm mb-4">Enter the kitchen passcode to manage orders.</p>
           <input
             type="password"
             value={code}
-            onChange={(e) => { setCode(e.target.value); setError(false); }}
+            onChange={(e) => { setCode(e.target.value); setError(""); }}
             onKeyDown={(e) => e.key === "Enter" && tryUnlock()}
             className="w-full bg-white border border-green-300 rounded-lg px-3.5 py-2.5 text-sm text-green-950 text-center focus:outline-none focus:ring-2 focus:ring-amber-400 mb-2"
             placeholder="Passcode"
           />
-          {error && <p className="text-red-500 text-xs mb-2">Incorrect passcode.</p>}
-          <button onClick={tryUnlock} className="w-full py-2.5 rounded-lg bg-amber-400 text-green-950 font-semibold hover:bg-amber-300 transition-colors shadow-sm">
-            Unlock
+          {error && <p className="text-red-500 text-xs mb-2">{error}</p>}
+          <button disabled={loginPending} onClick={tryUnlock} className="w-full py-2.5 rounded-lg bg-amber-400 text-green-950 font-semibold hover:bg-amber-300 disabled:opacity-60 transition-colors shadow-sm">
+            {loginPending ? "Signing in..." : "Unlock"}
           </button>
         </div>
       </div>
@@ -493,7 +495,7 @@ const [section, setSection] = useState("orders");
   };
 
   return (
-    <div className="min-h-screen bg-green-100 text-green-950" style={{ fontFamily: "'Work Sans', sans-serif" }}>
+    <div className="min-h-screen bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{FONTS}</style>
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-green-200 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -512,6 +514,12 @@ const [section, setSection] = useState("orders");
               className="text-[11px] px-2.5 py-1 rounded-full bg-green-100 border border-green-300 text-green-800 hover:text-amber-600"
             >
               ← Back to site
+            </button>
+            <button
+              onClick={signOut}
+              className="text-[11px] px-2.5 py-1 rounded-full bg-red-50 border border-red-200 text-red-700 hover:bg-red-100"
+            >
+              Sign out
             </button>
           </div>
         </div>
@@ -536,6 +544,12 @@ const [section, setSection] = useState("orders");
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-6">
+        {dashboardError && (
+          <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <span>{dashboardError}</span>
+            <button onClick={() => setDashboardError("")} className="font-semibold" aria-label="Dismiss error">×</button>
+          </div>
+        )}
         {section === "orders" && (
           <>
             <div className="flex gap-2 mb-5 overflow-x-auto">
@@ -730,7 +744,7 @@ const weekLabel = (ts) => {
             <div>
               <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
                 <div>
-                  <h2 className="text-green-950 text-lg font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>Invoices</h2>
+                  <h2 className="text-green-950 text-lg font-semibold" style={{ fontFamily: "var(--font-serif)" }}>Invoices</h2>
 <p className="text-green-800/50 text-xs mt-0.5">
                     {searched.length} accepted or completed {searched.length === 1 ? "order" : "orders"} &middot; {invoiceGroup === "day" ? "grouped by day" : invoiceGroup === "week" ? "grouped by week" : "newest first"}
                   </p>
@@ -753,20 +767,38 @@ const weekLabel = (ts) => {
                       </button>
                     ))}
                   </div>
-                  {/* Invoice actions: download all accepted PDFs + sync to Google Sheets */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => downloadAllInvoices()}
-                      title="Download a ZIP of one PDF per accepted order"
-                      className="px-3.5 py-2 rounded-lg text-sm font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                    >
-                      <Download className="w-3.5 h-3.5 inline -mt-0.5 mr-1" /> Download all
-                    </button>
+                  {/* Storage-free invoice batches + Google Sheets sync */}
+                  <div className="flex flex-wrap gap-2">
+                    {invoiceBatchInfo.totalBatches === 0 ? (
+                      <span className="px-3.5 py-2 rounded-lg text-sm border border-green-200 bg-white text-green-800/50">
+                        No accepted invoice batches
+                      </span>
+                    ) : Array.from({ length: invoiceBatchInfo.totalBatches }, (_, index) => index + 1).map((page) => (
+                      <button
+                        key={page}
+                        disabled={downloadingBatch !== null}
+                        onClick={async () => {
+                          setDownloadingBatch(page);
+                          try {
+                            await downloadInvoiceBatch(page);
+                          } catch (err) {
+                            alert(err.message || "Invoice batch download failed.");
+                          } finally {
+                            setDownloadingBatch(null);
+                          }
+                        }}
+                        title={`Download up to ${invoiceBatchInfo.batchSize} accepted invoices`}
+                        className="px-3.5 py-2 rounded-lg text-sm font-semibold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+                        {downloadingBatch === page ? "Preparing..." : `Batch ${page} of ${invoiceBatchInfo.totalBatches}`}
+                      </button>
+                    ))}
                     <button
                       onClick={async () => {
                         try {
-                          const { appended } = await syncToSheets();
-                          alert(`Synced ${appended} row(s) to Google Sheets.`);
+                          const { appended, alreadyPresent = 0 } = await syncToSheets();
+                          alert(`Added ${appended} new order(s) to Google Sheets.${alreadyPresent ? ` ${alreadyPresent} already existed and were not duplicated.` : ""}`);
                         } catch (err) {
                           alert(err.message || "Sync to Google Sheets failed.");
                         }
@@ -876,7 +908,7 @@ const weekLabel = (ts) => {
                           </div>
                           <div className="flex flex-wrap justify-end gap-2 mt-3 pt-3 border-t border-green-100">
                             <button
-                              onClick={() => shareInvoiceOnWhatsApp(o.id, o.customer.phone)}
+                              onClick={() => shareInvoiceOnWhatsApp(o.id, o.customer.phone, o.invoiceShareToken)}
                               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-300 text-green-800 hover:bg-green-50"
                             >
                               <Share2 className="w-3.5 h-3.5" /> Share on WhatsApp
@@ -932,7 +964,7 @@ const weekLabel = (ts) => {
                                   </div>
                                   <div className="flex flex-wrap justify-end gap-2 mt-3 pt-3 border-t border-green-100">
                                     <button
-                                      onClick={() => shareInvoiceOnWhatsApp(o.id, o.customer.phone)}
+                                      onClick={() => shareInvoiceOnWhatsApp(o.id, o.customer.phone, o.invoiceShareToken)}
                                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-green-300 text-green-800 hover:bg-green-50"
                                     >
                                       <Share2 className="w-3.5 h-3.5" /> Share on WhatsApp
@@ -1098,7 +1130,7 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
             <div>
               <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
                 <div>
-                  <h2 className="text-green-950 text-lg font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>Sales</h2>
+                  <h2 className="text-green-950 text-lg font-semibold" style={{ fontFamily: "var(--font-serif)" }}>Sales</h2>
 <p className="text-green-800/50 text-xs mt-0.5">
                     Based on completed orders &middot; {rangeLabel}
                   </p>

@@ -1,7 +1,6 @@
 @import "tailwindcss";
 
 /* Leaflet styles for the map picker */
-@import "leaflet/dist/leaflet.css";
 .leaflet-container { z-index: 0; }
 
 html { scroll-behavior: smooth; }

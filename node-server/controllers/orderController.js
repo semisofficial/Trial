@@ -1,5 +1,4 @@
 const orderModel = require("../models/orderModel");
-const salesModel = require("../models/salesModel");
 const { sendInvoiceNotification, sendDeclineNotification } = require("../utils/whatsappNotify");
 const { sendNewOrderNotification } = require("../utils/emailNotify");
 
@@ -8,6 +7,25 @@ const { sendNewOrderNotification } = require("../utils/emailNotify");
 // environment variable to "true" in the backend deployment.
 const WHATSAPP_NOTIFICATIONS_ENABLED =
   process.env.WHATSAPP_NOTIFICATIONS_ENABLED === "true";
+const ADMIN_EMAIL_TIMEOUT_MS = 5_000;
+
+async function waitForAdminEmail() {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error("Admin email notification timed out after 5 seconds");
+      error.code = "EMAIL_TIMEOUT";
+      reject(error);
+    }, ADMIN_EMAIL_TIMEOUT_MS);
+    timeoutId.unref?.();
+  });
+
+  try {
+    return await Promise.race([sendNewOrderNotification(), timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 const getOrders = async (req, res) => {
   try {
@@ -21,12 +39,11 @@ const getOrders = async (req, res) => {
 
 const createOrder = async (req, res) => {
   try {
-    const { id, invoiceId, customer, items, total, status, paymentStatus } = req.body;
-    const orderMode = customer?.mode || "Delivery";
+    const { customer, items } = req.body;
+    const orderMode = customer?.mode === "Pickup" ? "Pickup" : "Delivery";
 
-const order = await orderModel.createOrder({
-      id, invoiceId, customer, items, total, status,
-      orderMode, notes: customer?.notes, paymentStatus,
+    const order = await orderModel.createOrder({
+      customer, items, orderMode, notes: customer?.notes,
     });
 
     // Notify the admin by email that a new order arrived. Awaiting the send
@@ -34,7 +51,7 @@ const order = await orderModel.createOrder({
     // fire-and-forget call could be killed mid-flight) — but a send failure
     // never fails the order itself, it's only logged.
     try {
-      await sendNewOrderNotification();
+      await waitForAdminEmail();
     } catch (err) {
       console.error("❌ Failed to send admin new-order email:", err.message);
     }
@@ -42,7 +59,12 @@ const order = await orderModel.createOrder({
     res.status(201).json({ success: true, data: order });
   } catch (err) {
     console.error("❌ Failed to create order:", err.message);
-    res.status(500).json({ success: false, message: "Failed to create order" });
+    const status = err.code === "INSUFFICIENT_STOCK" ? 409 : err.code === "INVALID_ORDER" ? 400 : 500;
+    res.status(status).json({
+      success: false,
+      code: err.code || "ORDER_CREATION_FAILED",
+      message: status === 500 ? "Failed to create order" : err.message,
+    });
   }
 };
 
@@ -52,20 +74,6 @@ const updateOrderStatus = async (req, res) => {
     const { status } = req.body;
     const order = await orderModel.updateOrderStatus(id, status);
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-    // Populate the daily sales summary when an order is marked completed.
-    // Only count it the first time it transitions INTO `completed` (not when
-    // it's already completed, and not when it's moved to another status).
-    if (status === "completed" && order.previousStatus !== "completed") {
-      const summaryDate = new Date(order.created_at)
-        .toISOString()
-        .slice(0, 10);
-      await salesModel.upsertSummary({
-        date: summaryDate,
-        ordersDelta: 1,
-        revenueDelta: Number(order.total),
-      });
-    }
 
     // Automatic WhatsApp notifications on genuine status transitions only
     // (guarded by previousStatus, same pattern as the sales-summary block
@@ -82,7 +90,7 @@ const updateOrderStatus = async (req, res) => {
         console.warn("⚠️ PUBLIC_API_BASE_URL not set — skipped WhatsApp invoice notification");
       } else {
         try {
-          const invoiceUrl = `${process.env.PUBLIC_API_BASE_URL}/api/invoices/${order.id}`;
+          const invoiceUrl = `${process.env.PUBLIC_API_BASE_URL}/api/invoices/${order.id}?token=${encodeURIComponent(order.invoice_share_token)}`;
           await sendInvoiceNotification(order.customer_phone, order.customer_name || "Customer", invoiceUrl, order.total);
         } catch (err) {
           console.error(`❌ Failed to send accepted-order WhatsApp notification for ${order.id}:`, err.message);
@@ -103,7 +111,13 @@ const updateOrderStatus = async (req, res) => {
     res.json({ success: true, data: order });
   } catch (err) {
     console.error("❌ Failed to update order:", err.message);
-    res.status(500).json({ success: false, message: "Failed to update order" });
+    const statusCode = err.code === "INSUFFICIENT_STOCK" ? 409
+      : ["INVALID_ORDER", "INVALID_STATUS_TRANSITION"].includes(err.code) ? 400 : 500;
+    res.status(statusCode).json({
+      success: false,
+      code: err.code,
+      message: statusCode === 500 ? "Failed to update order" : err.message,
+    });
   }
 };
 
@@ -111,6 +125,9 @@ const updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { paymentStatus } = req.body;
+    if (!["paid", "unpaid"].includes(paymentStatus)) {
+      return res.status(400).json({ success: false, message: "Payment status must be paid or unpaid" });
+    }
     const order = await orderModel.updatePaymentStatus(id, paymentStatus);
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
     res.json({ success: true, data: order });
@@ -122,7 +139,8 @@ const updatePaymentStatus = async (req, res) => {
 
 const deleteOrder = async (req, res) => {
   try {
-    await orderModel.deleteOrder(req.params.id);
+    const deleted = await orderModel.deleteOrder(req.params.id);
+    if (!deleted) return res.status(404).json({ success: false, message: "Order not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Failed to delete order:", err.message);
@@ -143,10 +161,14 @@ const getArchivedOrders = async (req, res) => {
 const archiveOrders = async (req, res) => {
   try {
     const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ success: false, message: "ids array is required" });
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 200) {
+      return res.status(400).json({ success: false, message: "Between 1 and 200 order IDs are required" });
     }
-    const archived = await orderModel.archiveOrders(ids);
+    const cleanIds = [...new Set(ids.map((id) => typeof id === "string" ? id.trim() : ""))];
+    if (cleanIds.some((id) => !id || id.length > 128)) {
+      return res.status(400).json({ success: false, message: "One or more order IDs are invalid" });
+    }
+    const archived = await orderModel.archiveOrders(cleanIds);
     res.json({ success: true, data: archived });
   } catch (err) {
     console.error("❌ Failed to archive orders:", err.message);
