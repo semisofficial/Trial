@@ -73,6 +73,11 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/invoices", invoiceRoutes);
 
+// Platform health checks must not wake Neon or consume database CU-hours.
+app.get("/health", (req, res) => {
+  res.json({ success: true, status: "healthy" });
+});
+
 app.get("/", (req, res) => {
   res.json({
     success: true,

@@ -1,0 +1,74 @@
+services:
+  # Customer/admin React application served from Render's global CDN.
+  - type: web
+    runtime: static
+    name: semiskitchen
+    rootDir: semis-kitchen
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # Keep API calls first-party so the HttpOnly Admin session cookie works.
+      - type: rewrite
+        source: /api/*
+        destination: https://api.semiskitchen.in/api/*
+      - type: rewrite
+        source: /invoice/*
+        destination: https://api.semiskitchen.in/api/invoices/share/*
+      # React Router SPA fallback; keep this after the API rewrites.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+  # Always-on Express API in the same region as the Neon project.
+  - type: web
+    runtime: node
+    name: semiskitchenbe
+    rootDir: node-server
+    region: singapore
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://semiskitchen.in,https://www.semiskitchen.in
+      - key: PUBLIC_SITE_URL
+        value: https://semiskitchen.in
+      - key: PUBLIC_API_BASE_URL
+        value: https://semiskitchen.in
+      - key: GOOGLE_SERVICE_ACCOUNT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: WHATSAPP_NOTIFICATIONS_ENABLED
+        value: "false"
