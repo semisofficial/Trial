@@ -87,6 +87,16 @@ function indiaTodayISO(now = new Date()) {
   }).format(now);
 }
 
+function indiaMinutesOfDay(now = new Date()) {
+  const values = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now).map(({ type, value }) => [type, value]));
+  return Number(values.hour) * 60 + Number(values.minute);
+}
+
 function validISODate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
   const [year, month, day] = value.split("-").map(Number);
@@ -96,7 +106,7 @@ function validISODate(value) {
     && parsed.getUTCDate() === day;
 }
 
-function validateDeliveryDetails(customer, orderMode, today = indiaTodayISO()) {
+function validateDeliveryDetails(customer, orderMode, today = indiaTodayISO(), now = new Date()) {
   if (orderMode === "Delivery" && !customer.address && !customer.location) {
     throw orderError("A delivery address or map location is required");
   }
@@ -112,12 +122,17 @@ function validateDeliveryDetails(customer, orderMode, today = indiaTodayISO()) {
   if (!DELIVERY_SLOTS.has(customer.deliverySlot)) {
     throw orderError("Please select a valid delivery time between 11 AM and 9 PM");
   }
+  if (customer.deliveryDate === today) {
+    const slotStartMinutes = Number(customer.deliverySlot.split("-")[0]) * 60;
+    if (slotStartMinutes < indiaMinutesOfDay(now) + 180) {
+      throw orderError("Same-day orders require at least 3 hours of preparation time");
+    }
+  }
 }
 
-function validateMainsTiming(items, customer, orderMode, today = indiaTodayISO()) {
-  if (orderMode === "Delivery" && customer.deliveryDate === today
-      && items.some((item) => item.categoryId === "mains")) {
-    throw orderError("Biriyani and Curry items are not available for same-day delivery");
+function validateMainsTiming(items, customer, _orderMode, today = indiaTodayISO()) {
+  if (customer.deliveryDate === today && items.some((item) => item.categoryId === "mains")) {
+    throw orderError("Biriyani and Main items must be ordered at least one day in advance");
   }
 }
 

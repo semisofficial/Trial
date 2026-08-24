@@ -52,15 +52,19 @@ test("production CORS excludes localhost while development keeps it", () => {
 test("checkout validation enforces address, date range, slots, and mains timing", () => {
   const today = "2026-08-20";
   const valid = { address: "Test address", location: null, deliveryDate: today, deliverySlot: "11-12" };
-  validateDeliveryDetails(valid, "Delivery", today);
-  expectInvalid(() => validateDeliveryDetails({ ...valid, address: "" }, "Delivery", today));
-  expectInvalid(() => validateDeliveryDetails({ ...valid, deliveryDate: "2026-08-19" }, "Delivery", today));
-  expectInvalid(() => validateDeliveryDetails({ ...valid, deliveryDate: "2026-02-30" }, "Delivery", today));
-  expectInvalid(() => validateDeliveryDetails({ ...valid, deliveryDate: "2026-11-19" }, "Delivery", today));
-  expectInvalid(() => validateDeliveryDetails({ ...valid, deliverySlot: "21-22" }, "Delivery", today));
+  const earlyMorning = new Date("2026-08-20T02:00:00Z"); // 7:30 AM in India
+  const eightThirty = new Date("2026-08-20T03:00:00Z"); // 8:30 AM in India
+  validateDeliveryDetails(valid, "Delivery", today, earlyMorning);
+  expectInvalid(() => validateDeliveryDetails({ ...valid, address: "" }, "Delivery", today, earlyMorning));
+  expectInvalid(() => validateDeliveryDetails({ ...valid, deliveryDate: "2026-08-19" }, "Delivery", today, earlyMorning));
+  expectInvalid(() => validateDeliveryDetails({ ...valid, deliveryDate: "2026-02-30" }, "Delivery", today, earlyMorning));
+  expectInvalid(() => validateDeliveryDetails({ ...valid, deliveryDate: "2026-11-19" }, "Delivery", today, earlyMorning));
+  expectInvalid(() => validateDeliveryDetails({ ...valid, deliverySlot: "21-22" }, "Delivery", today, earlyMorning));
+  expectInvalid(() => validateDeliveryDetails(valid, "Delivery", today, eightThirty));
+  validateDeliveryDetails({ ...valid, deliverySlot: "12-13" }, "Delivery", today, eightThirty);
   expectInvalid(() => validateMainsTiming([{ categoryId: "mains" }], valid, "Delivery", today));
   validateMainsTiming([{ categoryId: "fried" }], valid, "Delivery", today);
-  validateMainsTiming([{ categoryId: "mains" }], valid, "Pickup", today);
+  expectInvalid(() => validateMainsTiming([{ categoryId: "mains" }], valid, "Pickup", today));
 });
 
 test("Google Sheets sync plan deduplicates order rows and existing IDs", () => {

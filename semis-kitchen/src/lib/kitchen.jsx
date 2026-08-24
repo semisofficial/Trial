@@ -461,7 +461,7 @@ export function downloadInvoice(orderId) {
 
 /* Open a customer WhatsApp chat with the branded public invoice link and the
    manual thank-you message. This does not call the Meta/WhatsApp API. */
-export async function shareInvoiceOnWhatsApp(orderId, customerPhone, invoiceShareToken) {
+export function shareInvoiceOnWhatsApp(orderId, customerPhone, invoiceShareToken) {
   let digits = String(customerPhone || "").replace(/\D/g, "");
   if (digits.length === 10) digits = `91${digits}`;
 
@@ -477,28 +477,22 @@ Thank you for supporting Semi’s Kitchen. 🍽️✨
 
 Your invoice: ${invoiceUrl}`;
 
-  // On supported mobile browsers, use the native share sheet with the QR as
-  // an actual image attachment. The admin can then choose WhatsApp and the
-  // customer receives both the message and the QR image together.
-  try {
-    const response = await fetch(qrUrl);
-    if (!response.ok) throw new Error("QR image unavailable");
-    const qrBlob = await response.blob();
-    const qrFile = new File([qrBlob], "semis-kitchen-upi-qr.jpeg", { type: "image/jpeg" });
-    const shareData = { title: "Semi's Kitchen invoice", text: message, files: [qrFile] };
-    if (navigator.share && navigator.canShare?.(shareData)) {
-      await navigator.share(shareData);
-      return;
-    }
-  } catch (err) {
-    if (err?.name === "AbortError") return;
-  }
-
-  // Desktop/older-browser fallback: open the customer's WhatsApp chat with
-  // both public links. The QR link can be opened or forwarded manually.
+  // Open the intended customer's WhatsApp chat directly. Web share sheets
+  // cannot target a particular recipient, so the QR remains a public link in
+  // the prepared message instead of being attached through navigator.share.
   const fallbackMessage = `${message}\n\nUPI payment QR: ${qrUrl}`;
   const recipient = digits ? `/${digits}` : "";
   window.open(`https://wa.me${recipient}?text=${encodeURIComponent(fallbackMessage)}`, "_blank", "noopener,noreferrer");
+}
+
+/* Open the declined customer's WhatsApp chat with a prepared manual notice.
+   The retained Meta integration stays disabled and is not called here. */
+export function shareDeclineOnWhatsApp(customerPhone) {
+  let digits = String(customerPhone || "").replace(/\D/g, "");
+  if (digits.length === 10) digits = `91${digits}`;
+  const message = "Hi! We sincerely apologize, but unfortunately we had to decline your order due to an unexpected issue. We’re really sorry for the inconvenience caused. Thank you for your understanding and for choosing Semi’s Kitchen. ❤️🙏 We hope to serve you soon!";
+  const recipient = digits ? `/${digits}` : "";
+  window.open(`https://wa.me${recipient}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
 }
 
 export async function fetchInvoiceBatchInfo() {

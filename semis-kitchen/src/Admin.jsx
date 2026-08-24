@@ -37,6 +37,7 @@ import {
   deliveryDateLabel,
   downloadInvoice,
   shareInvoiceOnWhatsApp,
+  shareDeclineOnWhatsApp,
   fetchInvoiceBatchInfo,
   downloadInvoiceBatch,
   syncToSheets,
@@ -632,6 +633,14 @@ const [section, setSection] = useState("orders");
                         >
                           {o.paymentStatus === "paid" ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                           {o.paymentStatus === "paid" ? "Paid" : "Not paid"}
+                        </button>
+                      )}
+                      {o.status === "declined" && (
+                        <button
+                          onClick={() => shareDeclineOnWhatsApp(o.customer.phone)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        >
+                          <Share2 className="w-3.5 h-3.5" /> Notify on WhatsApp
                         </button>
                       )}
                     </div>
