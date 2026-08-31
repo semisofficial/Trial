@@ -67,7 +67,7 @@ function validSession(req) {
 }
 
 function cookieOptions() {
-  const production = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+  const production = process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
     secure: production,

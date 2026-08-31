@@ -21,7 +21,7 @@ function databaseConfig() {
   const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
   if (process.env.NODE_ENV === "production" && hostname.includes("neon.tech") && !hostname.includes("-pooler")) {
     // Never log the connection URL because it contains database credentials.
-    console.warn("DATABASE_URL uses a direct Neon endpoint; use Neon's pooled connection string in Vercel.");
+    console.warn("DATABASE_URL uses a direct Neon endpoint; use Neon's pooled connection string in production.");
   }
 
   // pg-connection-string can override the explicit `ssl` object when sslmode
@@ -43,8 +43,8 @@ function databaseConfig() {
   };
 }
 
-// Warm Vercel instances reuse this small pool. pg releases idle clients after
-// 30 seconds; Neon's pooled endpoint shares connections across instances.
+// The long-running Render service reuses this small pool. pg releases idle
+// clients after 30 seconds; Neon's pooled endpoint shares connections safely.
 const pool = new Pool(databaseConfig());
 
 pool.on("error", (err) => {

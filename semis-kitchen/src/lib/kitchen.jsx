@@ -9,11 +9,10 @@ import {
 } from "lucide-react";
 import MENU_SNAPSHOT from "../menuSnapshot.js";
 
-// API base URL — set VITE_API_URL in production (Vercel env var) to point at
-// your deployed backend (e.g. https://your-api.vercel.app/api). In local dev
-// it defaults to a relative "/api" path, which the Vite dev server proxies to
-// the backend (see vite.config.js). Using a relative path avoids LAN-IP
-// reachability and CORS issues so the site works from any host.
+// API base URL. Render uses the relative "/api" path and forwards it to the
+// backend through render.yaml. Local development uses the Vite proxy in
+// vite.config.js. VITE_API_URL remains available for an intentional alternate
+// deployment, without tying the application to a specific hosting provider.
 export const API = import.meta.env.VITE_API_URL || "/api";
 
 async function adminRequest(path, options = {}) {

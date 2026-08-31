@@ -31,6 +31,9 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+      - path: /nashi
+        name: X-Robots-Tag
+        value: noindex, nofollow, noarchive
 
   # Always-on Express API in the same region as the Neon project.
   - type: web

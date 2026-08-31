@@ -3,7 +3,7 @@ import { MapPin, LocateFixed, Loader2 } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-/* Fix default marker icon path (Vite/Vercel bundling strips the images) */
+/* Fix the default marker icon path when Vite bundles Leaflet's images. */
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
