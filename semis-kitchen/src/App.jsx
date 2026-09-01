@@ -566,7 +566,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
               ))}
             </div>
 {form.mode === "Delivery" && (
-              <p className="mb-4 text-sm font-semibold text-amber-50 bg-amber-500/25 border border-amber-300 rounded-lg px-3 py-2">
+              <p className="mb-4 text-sm font-semibold text-[#8F341F] bg-amber-500/25 border border-amber-300 rounded-lg px-3 py-2">
                 Delivery charge is not included in the bill.
               </p>
             )}
