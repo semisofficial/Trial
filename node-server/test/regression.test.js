@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 process.env.DATABASE_URL ||= "postgresql://user:pass@localhost:5432/semis_test";
 process.env.ADMIN_PASSWORD = "test-admin-password";
 process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef";
+process.env.TZ = "UTC";
 
 const db = require("../config/db");
 const {
@@ -11,7 +12,7 @@ const {
 } = require("../middleware/adminAuth");
 const { validateDeliveryDetails, validateMainsTiming } = require("../models/orderModel");
 const { buildSheetSyncPlan } = require("../utils/googleSheetsSync");
-const { groupOrders, money, paymentLabel } = require("../utils/invoiceGenerator");
+const { groupOrders, money, paymentLabel, fmtDate, fmtTime } = require("../utils/invoiceGenerator");
 const { normalizeIndianPhone } = require("../utils/whatsappNotify");
 const { getAllowedOrigins } = require("../app");
 
@@ -91,6 +92,12 @@ test("invoice rows group without phantom items and format payment values", () =>
   assert.equal(money(25), "25.00");
   assert.equal(paymentLabel("upi"), "UPI");
   assert.equal(paymentLabel("cod"), "COD");
+});
+
+test("invoice timestamps are always formatted in Indian Standard Time", () => {
+  const nearMidnightUtc = "2026-09-08T20:00:00.000Z";
+  assert.equal(fmtDate(nearMidnightUtc), "09 Sept 2026");
+  assert.match(fmtTime(nearMidnightUtc), /^01:30\s*am$/i);
 });
 
 test("retained WhatsApp phone normalization does not make network calls", () => {

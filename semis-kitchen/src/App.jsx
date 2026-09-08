@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useCallback, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ShoppingBag,
   Plus,
@@ -16,6 +16,8 @@ import {
   loadMenuStored,
   createOrder,
 } from "./lib/kitchen.jsx";
+import { applyDeliveryDateInput, deliveryDateIsUnavailable } from "./lib/deliveryDate.js";
+import { floatingCartPlacement } from "./lib/floatingCart.js";
 
 const LocationPicker = lazy(() => import("./components/LocationPicker.jsx"));
 
@@ -87,6 +89,33 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
   const [stockError, setStockError] = useState(null);
   const [slide, setSlide] = useState(0);
   const [previousSlide, setPreviousSlide] = useState(null);
+  const [footerVisible, setFooterVisible] = useState(false);
+  const [footerHeight, setFooterHeight] = useState(0);
+  const footerRef = useRef(null);
+
+  useEffect(() => {
+    const footer = footerRef.current;
+    if (!footer) return undefined;
+
+    const updateFooterHeight = () => setFooterHeight(footer.offsetHeight);
+    updateFooterHeight();
+
+    const intersectionObserver = new IntersectionObserver(
+      ([entry]) => setFooterVisible(entry.isIntersecting),
+      { threshold: 0 }
+    );
+    intersectionObserver.observe(footer);
+
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updateFooterHeight);
+    resizeObserver?.observe(footer);
+
+    return () => {
+      intersectionObserver.disconnect();
+      resizeObserver?.disconnect();
+    };
+  }, []);
 
   const menuSlides = useMemo(
     () => {
@@ -174,6 +203,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0);
   const cartTotal = cartLines.reduce((s, l) => s + l.qty * l.price, 0);
   const hasMainsInCart = cartLines.some((line) => line.cat === "mains");
+  const cartPlacement = floatingCartPlacement(footerVisible, footerHeight);
   const indiaNow = indiaDateTime();
   const minimumDeliveryDate = hasMainsInCart ? addDaysISO(indiaNow.date, 1) : indiaNow.date;
   const availableDeliverySlots = form.deliveryDate === indiaNow.date
@@ -264,7 +294,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
   const itemsForTab = useMemo(() => menu.filter((m) => m.cat === tab), [menu, tab]);
 
   return (
-    <div className="customer-editorial min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="customer-editorial relative min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{`${FONTS}\n@keyframes heroCrossfade { from { opacity: 0; } to { opacity: 1; } }\n@media (prefers-reduced-motion: reduce) { .hero-slide-enter { animation: none !important; } }`}</style>
 
       {/* Hero */}
@@ -476,7 +506,8 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
       {cartCount > 0 && !cartOpen && !checkoutOpen && !confirmedOrder && (
         <button
           onClick={() => setCartOpen(true)}
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-[#6F6F32] text-[#FFF8E8] px-6 py-3.5 rounded-full shadow-[0_14px_36px_rgba(63,59,36,0.28)] font-semibold hover:bg-[#575726] transition-colors"
+          style={{ bottom: `${cartPlacement.bottom}px` }}
+          className={`${cartPlacement.position} left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-[#6F6F32] text-[#FFF8E8] px-6 py-3.5 rounded-full shadow-[0_14px_36px_rgba(63,59,36,0.28)] font-semibold hover:bg-[#575726] transition-colors`}
         >
           <ShoppingBag className="w-5 h-5" />
           {rupee(cartTotal)}
@@ -644,15 +675,18 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                     aria-invalid={checkoutErrors.deliveryDate || undefined}
                     onChange={(e) => {
                       const selectedDate = e.target.value;
-                      if (selectedDate && selectedDate < minimumDeliveryDate) {
-                        setForm((f) => ({ ...f, deliveryDate: "", deliverySlot: "" }));
-                        setCheckoutErrors((current) => ({ ...current, deliveryDate: true, deliverySlot: false }));
-                        setErrorMsg("Please choose an available date that has not already passed.");
-                        return;
-                      }
-                      setForm((f) => ({ ...f, deliveryDate: selectedDate, deliverySlot: "" }));
+                      // A date input can emit a temporary year such as 0002 while
+                      // the customer is still typing. Preserve that value here;
+                      // validating on each keystroke would reset the day/month.
+                      setForm((f) => applyDeliveryDateInput(f, selectedDate));
                       setCheckoutErrors((current) => ({ ...current, deliveryDate: false, deliverySlot: false }));
                       setErrorMsg("");
+                    }}
+                    onBlur={(e) => {
+                      if (deliveryDateIsUnavailable(e.currentTarget.value, minimumDeliveryDate)) {
+                        setCheckoutErrors((current) => ({ ...current, deliveryDate: true, deliverySlot: false }));
+                        setErrorMsg("Please choose an available date that has not already passed.");
+                      }
                     }}
                     style={{ WebkitAppearance: "none", appearance: "none", boxSizing: "border-box" }}
                     className={`block w-full max-w-full bg-green-900/60 border rounded-lg px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:ring-2 [color-scheme:dark] ${checkoutErrors.deliveryDate ? "border-red-400 ring-2 ring-red-400/40" : "border-green-800 focus:ring-amber-400"}`}
@@ -724,7 +758,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
       )}
 
       {/* Footer */}
-      <footer className="relative bg-[#3F3B24] text-[#FFF8E8] px-5 pt-16 pb-10 text-center overflow-hidden">
+      <footer ref={footerRef} className="relative bg-[#3F3B24] text-[#FFF8E8] px-5 pt-16 pb-10 text-center overflow-hidden">
         <div className="absolute -top-8 left-[-5%] w-[110%] h-16 bg-[#FFF8E8] rounded-[50%]" aria-hidden="true" />
         <div className="relative">
           <div className="text-3xl mb-2" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>Semi's Kitchen</div>

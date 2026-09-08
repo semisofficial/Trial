@@ -39,6 +39,7 @@ const LAYOUT = {
 
 const FONT_SIZE = 10;
 const INK = rgb(0.13, 0.13, 0.13);
+const INDIA_TIME_ZONE = "Asia/Kolkata";
 
 function money(n) {
   return Number(n).toFixed(2);
@@ -46,12 +47,21 @@ function money(n) {
 
 function fmtDate(d) {
   const dt = new Date(d);
-  return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return dt.toLocaleDateString("en-IN", {
+    timeZone: INDIA_TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function fmtTime(d) {
   const dt = new Date(d);
-  return dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  return dt.toLocaleTimeString("en-IN", {
+    timeZone: INDIA_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function paymentLabel(code) {

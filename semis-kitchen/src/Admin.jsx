@@ -45,6 +45,7 @@ import {
   checkAdminSession,
   adminLogout,
 } from "./lib/kitchen.jsx";
+import { formatIndiaDate, indiaCalendarDateKey } from "./lib/dateTime.js";
 
 /* ---------------------------------------------------------
    Admin dashboard (secret route /nashi)
@@ -63,7 +64,7 @@ const [section, setSection] = useState("orders");
   const [salesGroup, setSalesGroup] = useState("day"); // day | week
   // Flexible date-range filtering (all / day / week / month) applied to invoices & sales
   const [invRange, setInvRange] = useState("all");
-  const [invRefDate, setInvRefDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [invRefDate, setInvRefDate] = useState(() => indiaCalendarDateKey());
   const [invSearch, setInvSearch] = useState("");
   // Sub-tabs within the invoices & sales sections
   const [invSub, setInvSub] = useState("list"); // list | payments
@@ -325,8 +326,7 @@ const [section, setSection] = useState("orders");
   const allInvoiceOrders = [...archived, ...orders];
 
 /* ---------- Shared date-range helpers ---------- */
-  const fmtDate = (ts) =>
-    new Date(ts).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const fmtDate = (ts) => formatIndiaDate(ts);
 
   const weekLabel = (ts) => {
     const start = new Date(ts);
