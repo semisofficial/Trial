@@ -109,7 +109,7 @@ async function getAcceptedInvoiceBatchInfo(req, res) {
 }
 
 // Generates at most three invoices in memory. No ZIP or PDF is written to
-// Vercel storage, Neon, or the repository.
+// Render storage, Neon, or the repository.
 async function getAcceptedInvoicesZip(req, res) {
   const archiver = require("archiver");
   try {

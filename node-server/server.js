@@ -1,5 +1,5 @@
 // Long-running server entry point for local development, Render, or Railway.
-// Vercel continues to use the serverless function at /api/index.js.
+// Render starts this long-running HTTP server with `npm start`.
 require("dotenv").config();
 
 const app = require("./app");

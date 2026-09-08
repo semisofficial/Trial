@@ -14,15 +14,12 @@ const { apiLimiter } = require("./middleware/rateLimits");
 const app = express();
 app.set("trust proxy", 1);
 
-// Explicitly list all authorized dev and production domains in this array.
-// To add a new domain WITHOUT a code change, set the ALLOWED_ORIGINS env var
-// on the backend deployment (Vercel -> the project -> Settings -> Environment
-// Variables) to a comma-separated list extra origins, e.g.
-//   ALLOWED_ORIGINS=https://client-preview.vercel.app
+// Explicitly list the canonical production domains in this array. To add a
+// preview or replacement domain without changing code, set ALLOWED_ORIGINS on
+// the backend service to a comma-separated list of additional origins.
 // Origins are matched exactly (scheme + host + port), so include https:// and
 // a www vs. bare domain separately if you use both.
 const DEFAULT_ORIGINS = [
-  "https://semiskitchen.vercel.app",
   "https://semiskitchen.in",
   "https://www.semiskitchen.in"
 ];
@@ -36,8 +33,7 @@ function getAllowedOrigins(nodeEnv = process.env.NODE_ENV, extraOrigins = proces
   return [...new Set(DEFAULT_ORIGINS.concat(developmentOrigins, configuredOrigins))];
 }
 
-// Append any extra origins from env (comma-separated), trimming whitespace so
-// entries like "https://client-preview.vercel.app" work.
+// Append any extra origins from env (comma-separated), trimming whitespace.
 const allowedOrigins = getAllowedOrigins();
 
 // 2. Use a dynamic matching function for multi-domain support

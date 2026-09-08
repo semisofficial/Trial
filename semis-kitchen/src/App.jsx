@@ -19,6 +19,16 @@ import {
 
 const LocationPicker = lazy(() => import("./components/LocationPicker.jsx"));
 
+function InstagramIcon({ className = "" }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect width="18" height="18" x="3" y="3" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.5" cy="6.5" r="0.75" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /* ---------------------------------------------------------
    Delivery time slots: hourly ranges from 11 AM to 9 PM.
 --------------------------------------------------------- */
@@ -556,7 +566,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
               ))}
             </div>
 {form.mode === "Delivery" && (
-              <p className="mb-4 text-sm font-semibold text-amber-50 bg-amber-500/25 border border-amber-300 rounded-lg px-3 py-2">
+              <p className="mb-4 text-sm font-semibold text-[#8F341F] bg-amber-500/25 border border-amber-300 rounded-lg px-3 py-2">
                 Delivery charge is not included in the bill.
               </p>
             )}
@@ -719,7 +729,20 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
         <div className="relative">
           <div className="text-3xl mb-2" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>Semi's Kitchen</div>
           <p className="text-[#E8D7B5] text-sm">Malabar snacks &amp; curries, made to order</p>
-          <p className="mt-8 text-xs text-[#E8D7B5]/55">Built by <span className="font-semibold tracking-[0.16em]">QOZYD</span></p>
+          <nav aria-label="Footer" className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-3 text-sm text-[#E8D7B5]">
+            <a href="/privacy" className="hover:text-white hover:underline">Privacy Policy</a>
+            <a href="/terms" className="hover:text-white hover:underline">Terms</a>
+            <a
+              href="https://www.instagram.com/semisofficial_/"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Semi's Kitchen on Instagram"
+              className="inline-flex items-center gap-2 hover:text-white hover:underline"
+            >
+              <InstagramIcon className="h-4 w-4" />
+            </a>
+          </nav>
+          <p className="mt-7 text-xs text-[#E8D7B5]/55">Built by <span className="font-semibold tracking-[0.16em]">QOZYD</span></p>
         </div>
       </footer>
 

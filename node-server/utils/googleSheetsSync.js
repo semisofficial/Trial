@@ -14,7 +14,7 @@ const SHEETS_REQUEST_OPTIONS = Object.freeze({
 //    client_email -> give it Editor access.
 // 5. Copy the spreadsheet ID from its URL.
 //
-// --- Env vars to set on Vercel (Settings -> Environment Variables) ---
+// --- Environment variables to set on the backend hosting service ---
 // GOOGLE_SERVICE_ACCOUNT_EMAIL = client_email from the JSON key
 // GOOGLE_PRIVATE_KEY           = private_key from the JSON key, with real
 //                                 newlines escaped as \n (paste as one line)

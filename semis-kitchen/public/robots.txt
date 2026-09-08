@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /nashi
+Disallow: /api/
+Disallow: /invoice/
+
+Sitemap: https://semiskitchen.in/sitemap.xml
