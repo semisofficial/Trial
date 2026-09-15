@@ -401,7 +401,6 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
         {tab === "mains" && (
           <p className="mb-6 text-sm text-[#7D4A32] bg-[#D99168]/15 border border-[#C8754F]/25 rounded-2xl px-4 py-3 text-center">
             Please note: same-day delivery is not available for Biriyani &amp; Curry items.
-            {" "}On Sundays, delivery orders must also include fried or frozen snacks.
           </p>
         )}
         {menuState === "stale" && (
