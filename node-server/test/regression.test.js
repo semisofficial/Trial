@@ -1,12 +1,13 @@
-const { after, test } = require("node:test");
+const { before, after, test } = require("node:test");
 const assert = require("node:assert/strict");
+const { testDatabase } = require("../test-support/database");
+const fixture = testDatabase();
 
 process.env.DATABASE_URL ||= "postgresql://user:pass@localhost:5432/semis_test";
 process.env.ADMIN_PASSWORD = "test-admin-password";
 process.env.SESSION_SECRET = "0123456789abcdef0123456789abcdef";
 process.env.TZ = "UTC";
 
-const db = require("../config/db");
 const {
   COOKIE_NAME, createSessionToken, validSession, cookieOptions,
 } = require("../middleware/adminAuth");
@@ -16,7 +17,8 @@ const { groupOrders, money, paymentLabel, fmtDate, fmtTime } = require("../utils
 const { normalizeIndianPhone } = require("../utils/whatsappNotify");
 const { getAllowedOrigins } = require("../app");
 
-after(() => db.end());
+before(() => fixture.schema());
+after(() => fixture.close());
 
 function requestWithToken(token) {
   return { headers: { cookie: `${COOKIE_NAME}=${encodeURIComponent(token)}` } };
@@ -26,20 +28,13 @@ function expectInvalid(fn) {
   assert.throws(fn, (error) => error?.code === "INVALID_ORDER");
 }
 
-test("admin sessions accept valid tokens and reject malformed, tampered, and expired tokens", () => {
-  const originalNow = Date.now;
-  const issuedAt = originalNow();
-  Date.now = () => issuedAt;
-  try {
-    const token = createSessionToken();
-    assert.equal(validSession(requestWithToken(token)), true);
-    assert.equal(validSession(requestWithToken(`${token}x`)), false);
-    assert.equal(validSession({ headers: { cookie: `${COOKIE_NAME}=%ZZ` } }), false);
-    Date.now = () => issuedAt + (12 * 60 * 60 * 1000) + 1;
-    assert.equal(validSession(requestWithToken(token)), false);
-  } finally {
-    Date.now = originalNow;
-  }
+test("admin sessions accept valid tokens and reject malformed, tampered, and expired tokens", async () => {
+  const token = await createSessionToken();
+  assert.equal(await validSession(requestWithToken(token)), true);
+  assert.equal(await validSession(requestWithToken(`${token}x`)), false);
+  assert.equal(await validSession({ headers: { cookie: `${COOKIE_NAME}=%ZZ` } }), false);
+  await fixture.query("UPDATE admin_sessions SET expires_at=now()-interval '1 second'");
+  assert.equal(await validSession(requestWithToken(token)), false);
   assert.equal(cookieOptions().sameSite, "lax");
   assert.equal(cookieOptions().httpOnly, true);
 });

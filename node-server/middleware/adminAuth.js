@@ -1,7 +1,12 @@
 const crypto = require("crypto");
+const db = require("../config/db");
 
 const COOKIE_NAME = "semis_admin_session";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_ACTIVE_SESSIONS = 100;
+// Cache only within one HTTP request, so invoice middleware and controllers
+// share a lookup without delaying revocation on subsequent requests.
+const requestSessions = new WeakMap();
 
 function configured() {
   return Boolean(
@@ -11,8 +16,9 @@ function configured() {
   );
 }
 
-function sign(value) {
-  return crypto.createHmac("sha256", process.env.SESSION_SECRET).update(value).digest("base64url");
+function credentialVersion() {
+  return crypto.createHmac("sha256", process.env.SESSION_SECRET)
+    .update(`admin-session-v2:${process.env.ADMIN_PASSWORD}`).digest("hex");
 }
 
 function safeEqual(left, right) {
@@ -21,12 +27,38 @@ function safeEqual(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-function createSessionToken() {
-  const payload = Buffer.from(JSON.stringify({
-    exp: Date.now() + SESSION_TTL_MS,
-    nonce: crypto.randomBytes(16).toString("base64url"),
-  })).toString("base64url");
-  return `${payload}.${sign(payload)}`;
+function tokenHash(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function unavailable(cause) {
+  const error = new Error("Staff authentication is temporarily unavailable. Please try again.");
+  error.code = "AUTH_UNAVAILABLE";
+  error.cause = cause;
+  return error;
+}
+
+async function createSessionToken() {
+  if (!configured()) throw unavailable();
+  const token = crypto.randomBytes(32).toString("base64url");
+  let client;
+  try {
+    client = await db.connect();
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(73425101)");
+    const version = credentialVersion();
+    // Request-driven cleanup: never keep a timer or a Neon compute awake.
+    await client.query("DELETE FROM admin_sessions WHERE expires_at <= now() OR credential_version <> $1", [version]);
+    await client.query(`DELETE FROM admin_sessions WHERE token_hash IN
+      (SELECT token_hash FROM admin_sessions ORDER BY created_at DESC, token_hash OFFSET $1)`, [MAX_ACTIVE_SESSIONS - 1]);
+    await client.query(`INSERT INTO admin_sessions(token_hash, credential_version, expires_at)
+      VALUES ($1, $2, now() + interval '12 hours')`, [tokenHash(token), version]);
+    await client.query("COMMIT");
+    return token;
+  } catch (cause) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    throw unavailable(cause);
+  } finally { client?.release(); }
 }
 
 function readCookies(req) {
@@ -49,21 +81,32 @@ function readCookies(req) {
   );
 }
 
-function validSession(req) {
+async function lookupSession(req) {
   if (!configured()) return false;
   const token = readCookies(req)[COOKIE_NAME];
-  if (!token) return false;
-  const separator = token.lastIndexOf(".");
-  if (separator < 1) return false;
-  const payload = token.slice(0, separator);
-  const signature = token.slice(separator + 1);
-  if (!safeEqual(signature, sign(payload))) return false;
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token || "")) return false;
   try {
-    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return Number.isFinite(session.exp) && session.exp > Date.now();
-  } catch {
-    return false;
+    const result = await db.query(`SELECT 1 FROM admin_sessions
+      WHERE token_hash = $1 AND credential_version = $2 AND expires_at > now()`,
+    [tokenHash(token), credentialVersion()]);
+    return result.rowCount === 1;
+  } catch (cause) {
+    throw unavailable(cause);
   }
+}
+
+function validSession(req) {
+  if (!requestSessions.has(req)) requestSessions.set(req, lookupSession(req));
+  return requestSessions.get(req);
+}
+
+async function revokeSession(req) {
+  const token = readCookies(req)[COOKIE_NAME];
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token || "")) return;
+  try {
+    await db.query("DELETE FROM admin_sessions WHERE token_hash = $1", [tokenHash(token)]);
+    requestSessions.set(req, Promise.resolve(false));
+  } catch (cause) { throw unavailable(cause); }
 }
 
 function cookieOptions() {
@@ -77,11 +120,12 @@ function cookieOptions() {
   };
 }
 
-function requireAdmin(req, res, next) {
+async function requireAdmin(req, res, next) {
+  res.set("Cache-Control", "private, no-store");
   if (!configured()) {
     return res.status(503).json({ success: false, message: "Admin authentication is not configured" });
   }
-  if (!validSession(req)) {
+  if (!await validSession(req)) {
     return res.status(401).json({ success: false, message: "Admin authentication required" });
   }
   next();
@@ -93,6 +137,7 @@ module.exports = {
   safeEqual,
   createSessionToken,
   validSession,
+  revokeSession,
   cookieOptions,
   requireAdmin,
 };

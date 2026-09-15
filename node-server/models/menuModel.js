@@ -14,6 +14,8 @@ async function queryMenu() {
   return db.query(`
     SELECT
       m.id,
+      m.is_combo AS "isCombo",
+      COALESCE(m.stock_group_id, m.id) AS "stockGroupId",
       m.category_id AS cat,
       m.name,
       CASE
@@ -25,12 +27,14 @@ async function queryMenu() {
       m.seasonal,
       m.image AS img,
       COALESCE(i.selling_price, m.default_price) AS price,
-      COALESCE(i.stock, 0) AS stock,
+      CASE WHEN m.category_id = 'mains' THEN NULL ELSE FLOOR(COALESCE(si.stock, 0)) END AS stock,
       COALESCE(i.available, true) AS available
     FROM menu_items m
     JOIN categories c ON c.id = m.category_id
     LEFT JOIN inventory i ON i.menu_item_id = m.id
-    ORDER BY c.id, m.name;
+    LEFT JOIN inventory si ON si.menu_item_id = COALESCE(m.stock_group_id, m.id)
+    WHERE NOT m.retired
+    ORDER BY c.id, m.is_combo DESC, m.name;
   `);
 }
 

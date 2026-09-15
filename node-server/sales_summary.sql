@@ -25,11 +25,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT false;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_slot TEXT;
 
--- Inventory is reserved atomically when a new order is created. The flag
--- makes decline/delete restoration idempotent and prevents double-decrements.
+-- Legacy reservation marker retained for old orders. Current orders use manual
+-- inventory; menu_offers.sql releases any outstanding legacy reservations once.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_reserved BOOLEAN NOT NULL DEFAULT false;
--- Orders accepted by the previous frontend flow already had stock deducted.
-UPDATE orders SET stock_reserved = true WHERE status = 'accepted' AND stock_reserved = false;
 
 -- Separate unguessable capability token for customer-facing invoice links.
 -- Admin sessions can still open invoices without putting this token in a URL.
@@ -43,8 +41,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_invoice_share_token ON orders (invo
 -- Database-level integrity guards. Application validation gives friendly
 -- errors; these constraints are the final protection against malformed data.
 ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_stock_nonnegative;
--- NULL means stock has not been entered yet; it remains unorderable because
--- order validation treats it as zero. The constraint still forbids negatives.
+-- NULL means the manual production count has not been entered yet.
 ALTER TABLE inventory ADD CONSTRAINT inventory_stock_nonnegative CHECK (stock IS NULL OR stock >= 0);
 ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_price_nonnegative;
 ALTER TABLE inventory ADD CONSTRAINT inventory_price_nonnegative CHECK (selling_price IS NOT NULL AND selling_price >= 0);

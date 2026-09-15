@@ -12,7 +12,12 @@ const authRoutes = require("./routes/authRoutes");
 const { apiLimiter } = require("./middleware/rateLimits");
 
 const app = express();
-app.set("trust proxy", 1);
+// Local/direct hosting must not let callers choose their rate-limit identity.
+// Render terminates connections at its proxy. Do not increase the hop count
+// without verifying BOTH the direct API and static-site rewrite paths.
+const proxyHops = process.env.TRUST_PROXY_HOPS ?? (process.env.RENDER === "true" ? "1" : "0");
+if (!/^[0-3]$/.test(proxyHops)) throw new Error("TRUST_PROXY_HOPS must be an integer from 0 to 3");
+app.set("trust proxy", Number(proxyHops));
 
 // Explicitly list the canonical production domains in this array. To add a
 // preview or replacement domain without changing code, set ALLOWED_ORIGINS on
@@ -50,7 +55,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Idempotency-Key"]
 };
 app.use(cors(corsOptions));
 
@@ -65,6 +70,7 @@ app.use("/api", apiLimiter);
 app.use("/api/admin", authRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/offers", require("./routes/offerRoutes"));
 app.use("/api/orders", orderRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/invoices", invoiceRoutes);
@@ -88,9 +94,12 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const isCorsError = String(err?.message || "").startsWith("CORS policy restriction");
-  const status = isCorsError ? 403 : err?.type === "entity.too.large" ? 413 : 500;
+  const status = isCorsError ? 403 : err?.type === "entity.too.large" ? 413
+    : err?.code === "AUTH_UNAVAILABLE" ? 503 : err?.type === "entity.parse.failed" ? 400 : 500;
   const message = status === 403 ? "Origin not allowed"
     : status === 413 ? "Request body is too large"
+    : status === 503 ? "Staff authentication is temporarily unavailable. Please try again."
+    : status === 400 ? "Invalid JSON request body"
     : "Unexpected server error";
   console.error("Request failed:", err?.message || err);
   res.status(status).json({ success: false, message });

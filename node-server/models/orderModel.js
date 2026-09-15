@@ -46,7 +46,9 @@ function normalizeRequestedItems(items) {
     if (!id || !Number.isFinite(qty) || qty <= 0 || qty > 10000) {
       throw orderError("One or more cart quantities are invalid");
     }
-    combined.set(id, Math.round(((combined.get(id) || 0) + qty) * 1000) / 1000);
+    const aggregate = Math.round(((combined.get(id) || 0) + qty) * 1000) / 1000;
+    if (aggregate > 10000) throw orderError("One or more cart quantities exceed the safety limit");
+    combined.set(id, aggregate);
   }
   return [...combined].map(([id, qty]) => ({ id, qty }));
 }
@@ -130,9 +132,15 @@ function validateDeliveryDetails(customer, orderMode, today = indiaTodayISO(), n
   }
 }
 
-function validateMainsTiming(items, customer, _orderMode, today = indiaTodayISO()) {
+function validateMainsTiming(items, customer, orderMode, today = indiaTodayISO()) {
   if (customer.deliveryDate === today && items.some((item) => item.categoryId === "mains")) {
     throw orderError("Biriyani and Main items must be ordered at least one day in advance");
+  }
+  const hasMains = items.some((item) => item.categoryId === "mains");
+  const hasSnacks = items.some((item) => ["fried", "frozen"].includes(item.categoryId));
+  if (orderMode === "Delivery" && hasMains && !hasSnacks
+      && new Date(`${customer.deliveryDate}T00:00:00Z`).getUTCDay() === 0) {
+    throw orderError("Mains-only orders cannot be delivered on Sunday. Choose another date or include fried or frozen snacks.");
   }
 }
 
@@ -142,12 +150,12 @@ function followsQuantityRule(qty, minQty, stepQty) {
   return Math.abs(steps - Math.round(steps)) < 1e-7;
 }
 
-async function priceAndReserveItems(client, requestedItems) {
+async function priceItems(client, requestedItems) {
   const result = await client.query(
     `SELECT mi.id, mi.name, mi.category_id, mi.min_qty, mi.step_qty,
-            i.selling_price, i.stock, i.available
+            i.selling_price
        FROM menu_items mi JOIN inventory i ON i.menu_item_id = mi.id
-      WHERE mi.id = ANY($1::text[]) FOR UPDATE OF i`,
+      WHERE mi.id = ANY($1::text[]) AND NOT mi.retired FOR SHARE OF mi, i`,
     [requestedItems.map((item) => item.id)]
   );
   const catalog = new Map(result.rows.map((row) => [String(row.id), row]));
@@ -158,14 +166,9 @@ async function priceAndReserveItems(client, requestedItems) {
     const row = catalog.get(requested.id);
     const minQty = Number(row.min_qty) || 1;
     const stepQty = Number(row.step_qty) || 1;
-    const stock = Number(row.stock);
     const price = Number(row.selling_price);
-    if (!row.available) throw orderError(`${row.name} is currently unavailable`, "INSUFFICIENT_STOCK");
     if (!followsQuantityRule(requested.qty, minQty, stepQty)) {
       throw orderError(`${row.name} must be ordered from ${minQty} in steps of ${stepQty}`);
-    }
-    if (!Number.isFinite(stock) || requested.qty > stock) {
-      throw orderError(`Insufficient stock for ${row.name}. Only ${Math.max(0, stock || 0)} available.`, "INSUFFICIENT_STOCK");
     }
     if (!Number.isFinite(price) || price < 0) throw orderError(`${row.name} does not have a valid selling price`);
     authoritativeItems.push({
@@ -177,19 +180,17 @@ async function priceAndReserveItems(client, requestedItems) {
     });
   }
 
-  for (const item of authoritativeItems) {
-    const updated = await client.query(
-      `UPDATE inventory SET stock = stock - $1
-        WHERE menu_item_id = $2 AND available = true AND stock >= $1
-        RETURNING menu_item_id`,
-      [item.qty, item.id]
-    );
-    if (updated.rowCount !== 1) throw orderError(`Insufficient stock for ${item.name}`, "INSUFFICIENT_STOCK");
-  }
   return authoritativeItems;
 }
 
-async function insertOrder(client, { customer, items, orderMode, notes }) {
+function publicOrderRow(row) {
+  const result = { ...row };
+  delete result.checkout_key_hash;
+  delete result.checkout_request_hash;
+  return result;
+}
+
+async function insertOrder(client, { customer, items, orderMode, notes, keyHash, requestHash }) {
   const id = makeOrderId();
   const invoiceId = makeInvoiceId();
   const invoiceShareToken = makeInvoiceShareToken();
@@ -203,11 +204,13 @@ async function insertOrder(client, { customer, items, orderMode, notes }) {
   const paymentMethod = ["cod", "upi"].includes(customer.paymentMethod) ? customer.paymentMethod : "cod";
   const orderResult = await client.query(
     `INSERT INTO orders (id, customer_id, invoice_id, status, order_mode, notes, total,
-       payment_status, paymet, delivery_date, delivery_slot, stock_reserved, invoice_share_token)
-     VALUES ($1, $2, $3, 'pending', $4, $5, $6, 'unpaid', $7, $8, $9, true, $10)
+       payment_status, paymet, delivery_date, delivery_slot, stock_reserved, invoice_share_token,
+       checkout_key_hash, checkout_request_hash)
+     VALUES ($1, $2, $3, 'pending', $4, $5, $6, 'unpaid', $7, $8, $9, false, $10, $11, $12)
      RETURNING *`,
     [id, customerResult.rows[0].id, invoiceId, orderMode, notes || null, total,
-     paymentMethod, customer.deliveryDate || null, customer.deliverySlot || null, invoiceShareToken]
+     paymentMethod, customer.deliveryDate || null, customer.deliverySlot || null, invoiceShareToken,
+     keyHash || null, requestHash || null]
   );
   for (const item of items) {
     await client.query(
@@ -216,23 +219,58 @@ async function insertOrder(client, { customer, items, orderMode, notes }) {
       [id, item.id, item.qty, item.price, item.qty * item.price]
     );
   }
-  return { ...orderResult.rows[0], customer, items };
+  return { ...publicOrderRow(orderResult.rows[0]), customer, items, replayed: false };
 }
 
-async function createOrder({ customer, items, orderMode, notes }) {
-  const cleanCustomer = normalizeCustomer(customer);
-  validateDeliveryDetails(cleanCustomer, orderMode);
+async function createOrder({ customer, items, orderMode, notes, offerSlug, idempotencyKey }) {
+  const cleanCustomer = normalizeCustomer(customer && { ...customer, notes: customer.notes || notes });
+  if (!["Delivery", "Pickup"].includes(orderMode)) throw orderError("Invalid order mode");
   const requestedItems = normalizeRequestedItems(items);
+  // The public HTTP endpoint requires this key. Optional only for internal callers.
+  if (idempotencyKey != null && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+    throw orderError("Invalid checkout identifier");
+  }
+  const keyHash = idempotencyKey
+    ? crypto.createHash("sha256").update(idempotencyKey.toLowerCase()).digest("hex") : null;
+  const requestHash = keyHash ? crypto.createHash("sha256").update(JSON.stringify({
+    customer: cleanCustomer, orderMode, offerSlug: offerSlug ?? null,
+    items: [...requestedItems].sort((a, b) => a.id.localeCompare(b.id)),
+  })).digest("hex") : null;
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const authoritativeItems = await priceAndReserveItems(client, requestedItems);
+    if (keyHash) {
+      // Serializes matching keys across processes, without locking other checkouts.
+      // The unique index remains a final database-level guard.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [keyHash]);
+      const existing = (await client.query("SELECT * FROM orders WHERE checkout_key_hash=$1 FOR UPDATE", [keyHash])).rows[0];
+      if (existing) {
+        if (existing.checkout_request_hash !== requestHash) {
+          throw orderError("This checkout identifier was already used for different details. Please start a new checkout.", "IDEMPOTENCY_CONFLICT");
+        }
+        const savedItems = (await client.query(`SELECT oi.menu_item_id AS id, mi.name,
+          mi.category_id AS "categoryId", oi.quantity AS qty, oi.unit_price AS price
+          FROM order_items oi JOIN menu_items mi ON mi.id=oi.menu_item_id
+          WHERE oi.order_id=$1 ORDER BY oi.id`, [existing.id])).rows
+          .map(item => ({ ...item, qty: Number(item.qty), price: Number(item.price) }));
+        await client.query("COMMIT");
+        return { ...publicOrderRow(existing), customer: cleanCustomer, items: savedItems, replayed: true };
+      }
+    }
+    // A retry of an already-saved order must succeed even after its slot/offer ends.
+    validateDeliveryDetails(cleanCustomer, orderMode);
+    const authoritativeItems = await priceItems(client, requestedItems);
     validateMainsTiming(authoritativeItems, cleanCustomer, orderMode);
+    if (offerSlug != null) {
+      const { applyOfferToOrder } = require("./offerModel");
+      await applyOfferToOrder(client, offerSlug, authoritativeItems);
+    }
     const order = await insertOrder(client, {
       customer: cleanCustomer,
       items: authoritativeItems,
       orderMode,
-      notes: cleanCustomer.notes || notes,
+      notes: cleanCustomer.notes,
+      keyHash, requestHash,
     });
     await client.query("COMMIT");
     return order;
@@ -264,23 +302,6 @@ async function restoreOrderStock(client, id) {
   );
 }
 
-async function reserveExistingOrder(client, id) {
-  const result = await client.query(
-    `SELECT oi.menu_item_id AS id, oi.quantity AS qty, mi.name, i.stock, i.available
-       FROM order_items oi JOIN inventory i ON i.menu_item_id = oi.menu_item_id
-       JOIN menu_items mi ON mi.id = oi.menu_item_id
-      WHERE oi.order_id = $1 FOR UPDATE OF i`, [id]
-  );
-  for (const row of result.rows) {
-    if (!row.available || Number(row.qty) > Number(row.stock)) {
-      throw orderError(`Insufficient stock for ${row.name}. Only ${Math.max(0, Number(row.stock) || 0)} available.`, "INSUFFICIENT_STOCK");
-    }
-  }
-  for (const row of result.rows) {
-    await client.query(`UPDATE inventory SET stock = stock - $1 WHERE menu_item_id = $2`, [row.qty, row.id]);
-  }
-}
-
 async function updateOrderStatus(id, status) {
   const transitions = {
     pending: new Set(["accepted", "declined"]),
@@ -305,9 +326,6 @@ async function updateOrderStatus(id, status) {
         reserved = false;
       } else if (reserved && status === "completed") {
         reserved = false;
-      } else if (!reserved && (status === "pending" || status === "accepted")) {
-        await reserveExistingOrder(client, id);
-        reserved = true;
       }
     }
     const updated = await client.query(
@@ -327,7 +345,7 @@ async function updateOrderStatus(id, status) {
       );
     }
     await client.query("COMMIT");
-    return { ...updated.rows[0], previousStatus: previous.status };
+    return { ...publicOrderRow(updated.rows[0]), previousStatus: previous.status };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -337,7 +355,8 @@ async function updateOrderStatus(id, status) {
 }
 
 async function updatePaymentStatus(id, paymentStatus) {
-  return (await db.query(`UPDATE orders SET payment_status=$1 WHERE id=$2 RETURNING *`, [paymentStatus, id])).rows[0];
+  const row = (await db.query(`UPDATE orders SET payment_status=$1 WHERE id=$2 RETURNING *`, [paymentStatus, id])).rows[0];
+  return row ? publicOrderRow(row) : row;
 }
 
 async function deleteUnreferencedCustomers(client, customerIds) {

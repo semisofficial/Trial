@@ -40,10 +40,15 @@ const getOrders = async (req, res) => {
 const createOrder = async (req, res) => {
   try {
     const { customer, items } = req.body;
+    const idempotencyKey = req.get("Idempotency-Key");
+    if (!idempotencyKey) {
+      return res.status(400).json({ success: false, code: "CLIENT_UPDATE_REQUIRED",
+        message: "Please refresh this page before placing your order." });
+    }
     const orderMode = customer?.mode === "Pickup" ? "Pickup" : "Delivery";
 
     const order = await orderModel.createOrder({
-      customer, items, orderMode, notes: customer?.notes,
+      customer, items, orderMode, notes: customer?.notes, offerSlug: req.body.offerSlug, idempotencyKey,
     });
 
     // Notify the admin by email that a new order arrived. Awaiting the send
@@ -51,15 +56,17 @@ const createOrder = async (req, res) => {
     // fire-and-forget call could be killed mid-flight) — but a send failure
     // never fails the order itself, it's only logged.
     try {
-      await waitForAdminEmail();
+      if (!order.replayed) await waitForAdminEmail();
     } catch (err) {
       console.error("❌ Failed to send admin new-order email:", err.message);
     }
 
-    res.status(201).json({ success: true, data: order });
+    const { replayed, ...data } = order;
+    res.set("Cache-Control", "private, no-store");
+    res.status(replayed ? 200 : 201).json({ success: true, data });
   } catch (err) {
     console.error("❌ Failed to create order:", err.message);
-    const status = err.code === "INSUFFICIENT_STOCK" ? 409 : err.code === "INVALID_ORDER" ? 400 : 500;
+    const status = ["INSUFFICIENT_STOCK", "IDEMPOTENCY_CONFLICT"].includes(err.code) ? 409 : err.code === "INVALID_ORDER" ? 400 : 500;
     res.status(status).json({
       success: false,
       code: err.code || "ORDER_CREATION_FAILED",

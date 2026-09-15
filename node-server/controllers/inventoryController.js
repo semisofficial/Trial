@@ -13,7 +13,7 @@ exports.getInventory = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Unable to load inventory",
     });
   }
 };
@@ -29,8 +29,8 @@ exports.updateInventory = async (req, res) => {
     if (fields.length === 0 || fields.some((field) => !allowed.has(field))) {
       return res.status(400).json({ success: false, message: "Only stock, available, and price can be updated" });
     }
-    if (Object.hasOwn(body, "stock") && (!Number.isFinite(body.stock) || body.stock < 0 || body.stock > 1000000)) {
-      return res.status(400).json({ success: false, message: "Stock must be a non-negative number" });
+    if (Object.hasOwn(body, "stock") && (!Number.isInteger(body.stock) || body.stock < 0 || body.stock > 1000000)) {
+      return res.status(400).json({ success: false, message: "Stock must be a non-negative whole number" });
     }
     if (Object.hasOwn(body, "price") && (!Number.isFinite(body.price) || body.price < 0 || body.price > 10000000)) {
       return res.status(400).json({ success: false, message: "Price must be a non-negative number" });
@@ -54,7 +54,7 @@ exports.updateInventory = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Unable to update inventory",
     });
   }
 };

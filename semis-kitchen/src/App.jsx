@@ -16,8 +16,10 @@ import {
   loadMenuStored,
   createOrder,
 } from "./lib/kitchen.jsx";
-import { applyDeliveryDateInput, deliveryDateIsUnavailable } from "./lib/deliveryDate.js";
+import { applyDeliveryDateInput, deliveryDateIsUnavailable, mainsSundayBlocked } from "./lib/deliveryDate.js";
 import { floatingCartPlacement } from "./lib/floatingCart.js";
+import { checkoutAttempt } from "./lib/checkoutAttempt.js";
+import OfferLinks from "./components/OfferLinks.jsx";
 
 const LocationPicker = lazy(() => import("./components/LocationPicker.jsx"));
 
@@ -73,20 +75,30 @@ function addDaysISO(isoDate, days) {
    everywhere else double-renders on top of the browser's real placeholder. */
 const IS_IOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
+const CHATTIPATHIRI_WEIGHTS = [
+  { id: "mc-chattipathiri-1kg", label: "1 kg" },
+  { id: "mc-chattipathiri-1-5kg", label: "1.5 kg" },
+  { id: "mc-chattipathiri-2kg", label: "2 kg" },
+];
+
+
 /* ---------------------------------------------------------
    Customer: Menu + Cart + Checkout
 --------------------------------------------------------- */
-function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
+export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu, offer = null, offerExpired = false }) {
   const [tab, setTab] = useState("fried");
+  const [mainsTab, setMainsTab] = useState("all");
+  const [chattipathiriId, setChattipathiriId] = useState(CHATTIPATHIRI_WEIGHTS[0].id);
   const [cart, setCart] = useState({});
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState(null);
   const [form, setForm] = useState({ name: "", phone: "", address: "", notes: "", mode: "Delivery", location: null, paymentMethod: "cod", deliveryDate: "", deliverySlot: "" });
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [pendingAttempt, setPendingAttempt] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [checkoutErrors, setCheckoutErrors] = useState({});
-  const [stockError, setStockError] = useState(null);
   const [slide, setSlide] = useState(0);
   const [previousSlide, setPreviousSlide] = useState(null);
   const [footerVisible, setFooterVisible] = useState(false);
@@ -149,34 +161,17 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
     return () => clearTimeout(timer);
   }, [activeSlide, heroCount, menuSlides]);
 
-  const isAvailable = (id) => inventory[id]?.available !== false;
-
   // Effective price: prefer admin override stored in inventory, else MENU price
   const priceOf = (item) => (inventory[item.id]?.price != null ? inventory[item.id].price : item.price);
   // The public menu response includes the current inventory overlay. Admin
   // inventory management still uses its dedicated protected mutation route.
-  const stockOf = (item) => {
-    const stock = Number(inventory[item.id]?.stock ?? item.stock);
-    return Number.isFinite(stock) && stock >= 0 ? stock : null;
-  };
-
   const addItem = (item) => {
     if (!liveReady) return;
-    if (!isAvailable(item.id)) return;
     const step = item.step || 1;
     const minQty = item.minQty || step;
-    const availableStock = stockOf(item);
-    const currentQty = cart[item.id] || 0;
-    const proposedQty = currentQty === 0 ? minQty : currentQty + step;
-    if (availableStock !== null && proposedQty > availableStock) {
-      setStockError(item.id);
-      return;
-    }
-    setStockError((currentError) => (currentError === item.id ? null : currentError));
     setCart((c) => {
       const current = c[item.id] || 0;
       const next = current === 0 ? minQty : current + step;
-      if (availableStock !== null && next > availableStock) return c;
       return { ...c, [item.id]: Math.round(next * 100) / 100 };
     });
   };
@@ -188,7 +183,6 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
       const minQty = item?.minQty || 1;
       next[id] = Math.round((next[id] - step) * 100) / 100;
       if (next[id] < minQty) delete next[id];
-      setStockError((currentError) => (currentError === id ? null : currentError));
       return next;
     });
   };
@@ -210,19 +204,29 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
     ? DELIVERY_SLOTS.filter((slot) => Number(slot.id.split("-")[0]) * 60 >= indiaNow.minutes + 180)
     : DELIVERY_SLOTS;
   const selectedSlotIsAvailable = availableDeliverySlots.some((slot) => slot.id === form.deliverySlot);
-  const overstockedLine = cartLines.find((line) => {
-    const stock = stockOf(line);
-    return stock !== null && line.qty > stock;
-  });
+  const sundayBlocked = mainsSundayBlocked(cartLines, form.deliveryDate, form.mode);
+  const checkoutOrder = {
+    ...(offer ? { offerSlug: offer.slug } : {}),
+    items: cartLines.map((l) => ({ id: l.id, qty: l.qty })),
+    customer: {
+      name: form.name.trim(), phone: form.phone.trim(), address: form.address.trim(),
+      notes: form.notes.trim(), mode: form.mode, location: form.location || null,
+      paymentMethod: form.paymentMethod, deliveryDate: form.deliveryDate, deliverySlot: form.deliverySlot,
+    },
+  };
+  // Only an unchanged previously submitted payload can bypass client time gates.
+  // The backend still rejects new/unsaved expired purchases before inserting.
+  const isPendingRetry = pendingAttempt?.fingerprint === JSON.stringify(checkoutOrder);
 
   const submitOrder = async () => {
-    if (!liveReady) {
+    if (submittingRef.current) return;
+    if (!liveReady && !isPendingRetry) {
       setErrorMsg("Please wait while we confirm current prices and availability.");
       return;
     }
-    if (overstockedLine) {
-      setStockError(overstockedLine.id);
-      setErrorMsg(`Insufficient stock for ${overstockedLine.name}. Only ${stockOf(overstockedLine)} available.`);
+    if (sundayBlocked && !isPendingRetry) {
+      setCheckoutErrors((current) => ({ ...current, deliveryDate: true }));
+      setErrorMsg("Mains-only orders cannot be delivered on Sunday. Choose another date or include fried or frozen snacks.");
       return;
     }
     const hasLocation = form.location?.lat != null && form.location?.lng != null;
@@ -230,41 +234,31 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
       name: !form.name.trim(),
       phone: !form.phone.trim(),
       location: form.mode === "Delivery" && !form.address.trim() && !hasLocation,
-      deliveryDate: !form.deliveryDate || form.deliveryDate < minimumDeliveryDate,
-      deliverySlot: !form.deliverySlot || !selectedSlotIsAvailable,
+      deliveryDate: !form.deliveryDate || (!isPendingRetry && form.deliveryDate < minimumDeliveryDate),
+      deliverySlot: !form.deliverySlot || (!isPendingRetry && !selectedSlotIsAvailable),
     };
     setCheckoutErrors(requiredErrors);
     if (Object.values(requiredErrors).some(Boolean)) {
       setErrorMsg("Please fill in or correct the highlighted required fields.");
       return;
     }
-    if (hasMainsInCart && form.deliveryDate === indiaNow.date) {
+    if (!isPendingRetry && hasMainsInCart && form.deliveryDate === indiaNow.date) {
       setCheckoutErrors((current) => ({ ...current, deliveryDate: true }));
       setErrorMsg("Biriyani and Main items must be ordered at least one day in advance.");
       return;
     }
-    if (form.deliveryDate === indiaNow.date && !selectedSlotIsAvailable) {
+    if (!isPendingRetry && form.deliveryDate === indiaNow.date && !selectedSlotIsAvailable) {
       setCheckoutErrors((current) => ({ ...current, deliverySlot: true }));
       setErrorMsg("Same-day orders require at least 3 hours of preparation time.");
       return;
     }
     setSubmitting(true);
-    const order = {
-      items: cartLines.map((l) => ({ id: l.id, qty: l.qty })),
-      customer: {
-        name: form.name.trim(),
-        phone: form.phone.trim(),
-        address: form.address.trim(),
-        notes: form.notes.trim(),
-        mode: form.mode,
-        location: form.location || null,
-        paymentMethod: form.paymentMethod,
-        deliveryDate: form.deliveryDate,
-        deliverySlot: form.deliverySlot,
-      },
-    };
+    submittingRef.current = true;
+    const order = { ...checkoutOrder };
     try {
-      const created = await createOrder(order);
+      const attempt = checkoutAttempt(pendingAttempt, order);
+      setPendingAttempt(attempt);
+      const created = await createOrder(order, attempt.key);
       order.id = created.id;
       order.invoiceId = created.invoice_id;
       order.total = Number(created.total);
@@ -274,12 +268,15 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
     } catch (err) {
       console.error("Failed to place order:", err);
       setSubmitting(false);
+      submittingRef.current = false;
       setErrorMsg([400, 409, 429, 503].includes(err.status)
         ? err.message
         : "Sorry, we couldn't place your order. Please check your details or connection and try again.");
       return;
     }
     setSubmitting(false);
+    submittingRef.current = false;
+    setPendingAttempt(null);
     setErrorMsg("");
     setCheckoutErrors({});
     setCart({});
@@ -291,7 +288,25 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
     setConfirmedOrder(order);
   };
 
-  const itemsForTab = useMemo(() => menu.filter((m) => m.cat === tab), [menu, tab]);
+  const itemsForTab = useMemo(() => menu.filter((m) => offer || (m.cat === tab
+    && (tab !== "mains" || mainsTab === "all" || (mainsTab === "combos" ? m.isCombo : !m.isCombo))))
+    .sort((a, b) => Number(Boolean(b.isCombo)) - Number(Boolean(a.isCombo))), [menu, tab, mainsTab, offer]);
+
+  // Group only the customer-facing card. Original IDs/quantities remain intact
+  // for cart lines, server pricing, invoices and independent admin price edits.
+  const chattipathiriOptions = CHATTIPATHIRI_WEIGHTS
+    .map((weight) => ({ ...weight, item: itemsForTab.find((item) => item.id === weight.id) }))
+    .filter((weight) => weight.item);
+  const selectedChattipathiri = chattipathiriOptions.find((weight) => weight.id === chattipathiriId)
+    || chattipathiriOptions[0];
+  const displayItems = itemsForTab.filter((item) => !CHATTIPATHIRI_WEIGHTS.some((weight) => weight.id === item.id)
+    || item.id === chattipathiriOptions[0]?.id);
+
+  if (offerExpired && !pendingAttempt && !confirmedOrder) return (
+    <main className="min-h-screen bg-[#F6EDD7] text-[#3F3B24] flex items-center justify-center p-6 text-center">
+      <div><h1 className="text-3xl font-bold">Offer unavailable</h1><p className="my-4">This 24-hour offer has closed.</p><a className="underline" href="/">Order from the regular menu</a></div>
+    </main>
+  );
 
   return (
     <div className="customer-editorial relative min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
@@ -352,9 +367,10 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
       </header>
 
       {/* Category tabs */}
+      {!offer && <OfferLinks />}
       <section id="menu" className="bg-[#FFF8E8] pt-14 sm:pt-20">
         <div className="max-w-5xl mx-auto px-4 flex justify-center gap-2 overflow-x-auto pb-2">
-          {CATS.map((c) => {
+          {!offer && CATS.map((c) => {
             const active = tab === c.id;
             return (
               <button
@@ -369,6 +385,15 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
             );
           })}
         </div>
+        {!offer && tab === "mains" && (
+          <nav aria-label="Biriyani and curries sections" className="mt-4 flex justify-center gap-3">
+            {[["all", "Combos & Mains"], ["combos", "Combos"], ["mains", "Mains"]].map(([id, label]) => (
+              <button key={id} onClick={() => setMainsTab(id)} aria-pressed={mainsTab === id}
+                className={`rounded-full px-4 py-2 text-sm border ${mainsTab === id ? "bg-[#6F6F32] text-white" : "border-[#6F6F32]"}`}>{label}</button>
+            ))}
+          </nav>
+        )}
+        {offer && <div className="px-5 text-center"><h2 className="text-2xl font-bold">{offer.title}</h2><p>Bulk prices apply from each item's shown minimum quantity.</p><a href="/" className="underline">Regular menu</a></div>}
       </section>
 
       {/* Menu grid */}
@@ -376,6 +401,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
         {tab === "mains" && (
           <p className="mb-6 text-sm text-[#7D4A32] bg-[#D99168]/15 border border-[#C8754F]/25 rounded-2xl px-4 py-3 text-center">
             Please note: same-day delivery is not available for Biriyani &amp; Curry items.
+            {" "}On Sundays, delivery orders must also include fried or frozen snacks.
           </p>
         )}
         {menuState === "stale" && (
@@ -421,19 +447,18 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
           )
         ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-          {itemsForTab.map((item) => {
-            const available = isAvailable(item.id);
+          {displayItems.map((entry) => {
+            const isChattipathiri = entry.id === chattipathiriOptions[0]?.id;
+            const item = isChattipathiri ? selectedChattipathiri.item : entry;
             const qty = cart[item.id] || 0;
             return (
               <div
-                key={item.id}
-                className={`group rounded-[1.5rem] border border-[#E8D7B5]/80 bg-[#FFFCF3] overflow-hidden shadow-[0_10px_28px_rgba(82,67,43,0.07)] transition-transform duration-300 hover:-translate-y-1 ${
-                  !available ? "opacity-50" : ""
-                }`}
+                key={entry.id}
+                className="group rounded-[1.5rem] border border-[#E8D7B5]/80 bg-[#FFFCF3] overflow-hidden shadow-[0_10px_28px_rgba(82,67,43,0.07)] transition-transform duration-300 hover:-translate-y-1"
               >
                 {/* Item image */}
                 <div className="w-full h-48 sm:h-52 bg-[#E8D7B5] overflow-hidden">
-                  <img
+                  {resolveImg(item.img) && <img
                     src={resolveImg(item.img)}
                     alt={item.name}
                     loading="lazy"
@@ -443,16 +468,16 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                       e.target.style.display = "none";
                       e.target.nextElementSibling?.classList.remove("hidden");
                     }}
-                  />
-                  <div className="hidden w-full h-full flex items-center justify-center text-stone-600 text-xs">
-                    No image
+                  />}
+                  <div className={`${resolveImg(item.img) ? "hidden" : ""} w-full h-full flex items-center justify-center text-stone-600 text-sm`}>
+                    Photo coming soon
                   </div>
                 </div>
                 <div className="p-4 flex items-center justify-between gap-3">
                   <div>
                   <div className="text-lg text-[#3F3B24]" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>
-                      {item.name}
-                      <span className="text-stone-500 text-xs ml-1.5">{item.unit}</span>
+                      {isChattipathiri ? "Chattipathiri" : item.name}
+                      {!isChattipathiri && <span className="text-stone-500 text-xs ml-1.5">{item.unit}</span>}
                     </div>
                     <div className="text-[#C8754F] text-sm font-semibold mt-1">
                       {rupee(priceOf(item))}
@@ -463,14 +488,8 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                       )}
                       {item.seasonal && <span className="text-stone-500 text-xs ml-1.5">· seasonal price</span>}
                     </div>
-                    {!available && <div className="text-red-400 text-xs mt-1 font-medium">Sold out today</div>}
-                    {stockError === item.id && (
-                      <div className="text-red-600 text-xs mt-1 font-semibold" role="alert">
-                        Insufficient stock. Only {stockOf(item) ?? 0} available.
-                      </div>
-                    )}
                   </div>
-                  {liveReady && available ? (
+                  {liveReady ? (
                     qty > 0 ? (
                       <div className="flex items-center gap-2 bg-green-950 rounded-lg border border-green-800 px-1 py-1 shrink-0">
                         <button onClick={() => decItem(item.id, item)} className="w-7 h-7 flex items-center justify-center text-stone-300 hover:text-amber-300">
@@ -489,18 +508,30 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                         Add
                       </button>
                     )
-                  ) : liveReady ? (
-                    <div className="shrink-0 px-3.5 py-1.5 rounded-lg bg-green-800 text-stone-500 text-sm font-semibold">Sold out</div>
                   ) : (
                     <div className="shrink-0 px-3.5 py-1.5 rounded-lg bg-[#E8D7B5] text-[#6F6657] text-xs font-semibold">Checking…</div>
                   )}
                 </div>
+                {isChattipathiri && (
+                  <div role="group" aria-label="Chattipathiri weight" className="px-4 pb-4 flex flex-wrap gap-2">
+                    {chattipathiriOptions.map((weight) => (
+                      <button key={weight.id} type="button" aria-pressed={item.id === weight.id}
+                        onClick={() => setChattipathiriId(weight.id)}
+                        className={`rounded-full border px-3 py-2 text-sm font-semibold transition-colors ${item.id === weight.id
+                          ? "bg-[#6F6F32] border-[#6F6F32] text-[#FFF8E8]"
+                          : "border-[#E8D7B5] text-[#3F3B24] hover:border-[#6F6F32]"}`}>
+                        {weight.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
         )}
       </main>
+
 
       {/* Floating cart bar */}
       {cartCount > 0 && !cartOpen && !checkoutOpen && !confirmedOrder && (
@@ -539,11 +570,6 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                     </div>
                   </div>
                   <div className="text-right text-sm text-amber-400 font-semibold">{rupee(l.qty * l.price)}</div>
-                  {stockError === l.id && (
-                    <div className="text-right text-red-600 text-xs font-semibold" role="alert">
-                      Insufficient stock. Only {stockOf(l) ?? 0} available.
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -555,10 +581,6 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                 </div>
                 <button
                   onClick={() => {
-                    if (overstockedLine) {
-                      setStockError(overstockedLine.id);
-                      return;
-                    }
                     setCartOpen(false);
                     setCheckoutErrors({});
                     setErrorMsg("");
@@ -698,6 +720,7 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
                   )}
                 </div>
                 {checkoutErrors.deliveryDate && <p className="mt-1 text-xs text-red-300">Please choose an available delivery date.</p>}
+                {sundayBlocked && <p role="alert" className="mt-2 text-sm text-red-300">Mains-only orders cannot be delivered on Sunday. Choose another date or include fried or frozen snacks.</p>}
                 {/* A native <select> so mobile OSes render their own picker —
                     iOS shows an actual spinning wheel, Android a scrollable
                     list — instead of a custom-built one. */}
@@ -741,12 +764,12 @@ function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
               <span className="font-semibold text-amber-400">{rupee(cartTotal)}</span>
             </div>
             {errorMsg && (
-              <p className="text-red-400 text-sm mt-2">{errorMsg}</p>
+              <p role="alert" className="text-red-400 text-sm mt-2">{errorMsg}</p>
             )}
             <button
               disabled={
                 submitting ||
-                !liveReady
+                (!liveReady && !isPendingRetry)
               }
               onClick={submitOrder}
               className="w-full mt-3 py-3 rounded-lg bg-amber-400 text-green-950 font-semibold hover:bg-amber-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"

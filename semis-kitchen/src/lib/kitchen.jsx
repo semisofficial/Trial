@@ -116,6 +116,8 @@ export async function loadMenu() {
   const menu = json.data.map((item) => ({
     id: item.id,
     cat: item.cat,
+    isCombo: item.isCombo === true,
+    stockGroupId: item.stockGroupId || item.id,
     name: formatItemName(item.name),
     unit: item.unit,
     minQty: Number(item.minQty),
@@ -264,7 +266,7 @@ function readLocal(key) {
    keep working unchanged. localStorage is synchronous so React can
    seed its state from the cache on the first paint.
 --------------------------------------------------------- */
-const MENU_CACHE_KEY = "semis_menu_cache";
+const MENU_CACHE_KEY = "semis_menu_cache_v2";
 
 function readMenuCacheSync() {
   const v = readLocal(MENU_CACHE_KEY);
@@ -297,7 +299,8 @@ export async function loadInventory() {
 
   json.data.forEach((item) => {
     inv[item.menu_item_id] = {
-      stock: item.stock,
+      stock: item.stock == null ? null : Math.floor(Number(item.stock)),
+      stockGroupId: item.stock_group_id || item.menu_item_id,
       available: item.available,
       price: Number(item.selling_price),
     };
@@ -319,14 +322,29 @@ export async function updateInventoryField(id, patch) {
   return json.data;
 }
 
-export async function createOrder(order) {
+export async function createOrder(order, idempotencyKey) {
   const res = await fetch(`${API}/orders`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(order),
   });
   const json = await parseApiResponse(res, "Failed to place order");
   return json.data;
+}
+
+export async function loadOffers(slug = "") {
+  const res = await fetch(`${API}/offers${slug ? `/${encodeURIComponent(slug)}` : ""}`, { cache: "no-store" });
+  return parseApiResponse(res, "Unable to load offers");
+}
+
+export async function publishOffer(body) {
+  const res = await adminRequest("/offers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return (await parseApiResponse(res, "Unable to publish offer")).data;
+}
+
+export async function closeOffer(slug) {
+  const res = await adminRequest(`/offers/${encodeURIComponent(slug)}/close`, { method: "PUT" });
+  return parseApiResponse(res, "Unable to close offer");
 }
 
 export async function updatePaymentStatusApi(id, paymentStatus) {

@@ -19,6 +19,13 @@ services:
         source: /*
         destination: /index.html
     headers:
+      # First-party built scripts/fonts; Leaflet needs inline styles and these OSM services.
+      - path: /*
+        name: Content-Security-Policy
+        value: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://nominatim.openstreetmap.org; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+      - path: /o/*
+        name: X-Robots-Tag
+        value: noindex, follow
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
@@ -34,6 +41,24 @@ services:
       - path: /nashi
         name: X-Robots-Tag
         value: noindex, nofollow, noarchive
+      - path: /invoice/*
+        name: X-Robots-Tag
+        value: noindex, nofollow, noarchive
+      - path: /invoice/*
+        name: Cache-Control
+        value: private, no-store
+      - path: /invoice/*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /api/invoices/*
+        name: X-Robots-Tag
+        value: noindex, nofollow, noarchive
+      - path: /api/invoices/*
+        name: Cache-Control
+        value: private, no-store
+      - path: /api/invoices/*
+        name: Referrer-Policy
+        value: no-referrer
 
   # Always-on Express API in the same region as the Neon project.
   - type: web

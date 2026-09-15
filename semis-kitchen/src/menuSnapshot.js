@@ -770,4 +770,23 @@ const MENU_SNAPSHOT = [
   }
 ];
 
-export default MENU_SNAPSHOT;
+const additions = [
+  ["mc-broasted-chicken", "Broasted Chicken", "Full chicken - 8 pieces", 1, 1, 600],
+  ["mc-ghee-rice", "Ghee Rice", "1 KG", 1, 0.5, 600],
+  ["mc-butter-garlic-chicken", "Butter Garlic Chicken", "1 KG", 1, 0.5, 725],
+  ["mc-patthiri", "Patthiri", "1 Piece", 25, 5, 7],
+  ["mc-chapatis", "Chapatis", "1 Piece", 15, 5, 8],
+  ["mc-chattipathiri-1kg", "Chattipathiri - 1 kg", "1 pack (1 kg)", 1, 1, 350],
+  ["mc-chattipathiri-1-5kg", "Chattipathiri - 1.5 kg", "1 pack (1.5 kg)", 1, 1, 475],
+  ["mc-chattipathiri-2kg", "Chattipathiri - 2 kg", "1 pack (2 kg)", 1, 1, 650],
+  ["mc-vegetable-stew", "Vegetable Stew - Coconut Milk", "1 KG", 1, 0.5, 250],
+  ["fz-irachi-pathiri", "Irachi Pathiri", "1 Piece", 10, 5, 15],
+  ["combo-broasted", "Broasted full chicken + Hummus 250 g + Kuboos 11 pieces", "1 combo", 1, 1, 850],
+  ["combo-neypathal", "Neypathal 11 pieces + Beef Masala 375 g", "1 combo", 1, 1, 650],
+  ["combo-batura", "Batura 11 pieces + Butter Chicken 500 g", "1 combo", 1, 1, 600],
+].map(([id, name, unit, minQty, step, price]) => ({
+  id, name, unit, minQty, step, price, cat: id.startsWith("fz-") ? "frozen" : "mains",
+  isCombo: id.startsWith("combo-"), stock: null, available: true, seasonal: false, img: "",
+}));
+
+export default [...MENU_SNAPSHOT.filter((item) => item.id !== "fz-kallumakaya-plain"), ...additions];

@@ -8,7 +8,10 @@ function makeLimiter({ windowMs, limit, message, skipAdmin = false, skipSuccessf
     standardHeaders: "draft-8",
     legacyHeaders: false,
     skipSuccessfulRequests,
-    skip: (req) => req.method === "OPTIONS" || (skipAdmin && validSession(req)),
+    skip: async (req) => req.method === "OPTIONS" || (skipAdmin && await validSession(req)),
+    // Off Render, direct local requests deliberately ignore forwarding headers.
+    // The app validates its trust-proxy setting instead of trusting arbitrary XFF.
+    validate: { xForwardedForHeader: false },
     handler: (req, res) => {
       res.status(429).json({ success: false, code: "RATE_LIMITED", message });
     },

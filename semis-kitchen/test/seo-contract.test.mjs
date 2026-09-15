@@ -26,6 +26,10 @@ assert.match(html, /<link\s+rel="canonical"\s+href="https:\/\/semiskitchen\.in\/
 assert.match(html, /<meta\s+property="og:title"\s+content="[^"]+"/i, "The homepage must provide an Open Graph title");
 assert.match(html, /<meta\s+property="og:image"\s+content="https:\/\/semiskitchen\.in\/[^\"]+"/i, "The Open Graph image must be an absolute production URL");
 assert.match(html, /<script\s+type="application\/ld\+json">[\s\S]*"@type"\s*:\s*"Restaurant"[\s\S]*<\/script>/i, "The homepage must provide Restaurant structured data");
+const structuredData = [...html.matchAll(/<script\s+type="application\/ld\+json">([\s\S]*?)<\/script>/gi)]
+  .map((match) => JSON.parse(match[1]));
+assert.equal(structuredData.some((entry) => entry["@type"] === "FAQPage"), false, "Removed customer answers must not remain advertised as FAQ structured data");
+assert.match(JSON.stringify(legalContent.termsSections ?? []), /\+91 77360 51444/i, "The customer terms must retain the approved contact number");
 
 assert.match(robots, /^User-agent:\s*\*$/mi, "robots.txt must address all crawlers");
 assert.match(robots, /^Disallow:\s*\/nashi\s*$/mi, "The admin route must be excluded from crawling");

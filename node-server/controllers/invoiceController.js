@@ -22,7 +22,7 @@ function escapeHtml(value) {
 async function getInvoiceSharePage(req, res) {
   const orderId = String(req.params.orderId || "").trim();
   const token = String(req.query.token || "").trim();
-  const isAdmin = validSession(req);
+  const isAdmin = await validSession(req);
   if (!orderId || (!isAdmin && !token)) return res.status(404).send(INVOICE_NOT_FOUND);
 
   const authorized = await db.query(
@@ -67,7 +67,7 @@ async function getInvoiceSharePage(req, res) {
 // GET /api/invoices/:orderId  -> streams back a single filled invoice PDF
 async function getInvoice(req, res) {
   try {
-    const isAdmin = validSession(req);
+    const isAdmin = await validSession(req);
     const token = String(req.query.token || "").trim();
     if (!isAdmin && !token) {
       return res.status(404).json({ success: false, error: INVOICE_NOT_FOUND });

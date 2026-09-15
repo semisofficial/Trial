@@ -115,6 +115,54 @@ function drawTextLeft(page, font, text, x, yTop, pageHeight, size = FONT_SIZE) {
   page.drawText(text, { x, y: pageHeight - yTop, size, font, color: INK });
 }
 
+function wrapDescription(text, font, width) {
+  const lines = [];
+  let line = "";
+  for (const word of String(text || "").trim().split(/\s+/)) {
+    if (line && font.widthOfTextAtSize(`${line} ${word}`, FONT_SIZE) <= width) {
+      line += ` ${word}`;
+      continue;
+    }
+    if (line) lines.push(line);
+    line = "";
+    // Split an unusually long unbroken word too; never paint across a column.
+    for (const character of word) {
+      if (line && font.widthOfTextAtSize(line + character, FONT_SIZE) > width) {
+        lines.push(line);
+        line = "";
+      }
+      line += character;
+    }
+  }
+  if (line || !lines.length) lines.push(line);
+  return lines;
+}
+
+function layoutItems(items, font) {
+  const { table } = LAYOUT;
+  const lineHeight = 12;
+  const capacity = table.maxRowsPerPage * table.rowHeight;
+  const pages = [[]];
+  let used = 0;
+  for (const item of items) {
+    const priceLeft = table.unitPrice.rightX - font.widthOfTextAtSize(money(item.unit_price), FONT_SIZE);
+    const width = Math.min(185.2, priceLeft - table.desc.x - 10);
+    const lines = wrapDescription(item.name, font, Math.max(40, width));
+    const maxLines = Math.floor((capacity - (table.rowHeight - lineHeight)) / lineHeight);
+    for (let offset = 0; offset < lines.length; offset += maxLines) {
+      const part = lines.slice(offset, offset + maxLines);
+      const height = table.rowHeight + (part.length - 1) * lineHeight;
+      if (used + height > capacity + 0.001 && pages.at(-1).length) {
+        pages.push([]);
+        used = 0;
+      }
+      pages.at(-1).push({ item, lines: part, yTop: table.firstRowYTop + used, showAmounts: offset === 0 });
+      used += height;
+    }
+  }
+  return pages;
+}
+
 /**
  * Renders one order into a filled PDF (Buffer). Automatically spans multiple
  * template pages if the order has more line items than fit on one page.
@@ -129,11 +177,7 @@ async function generateInvoicePDF(order) {
   const fontBold = await out.embedFont(fs.readFileSync(FONT_BOLD_PATH));
 
   const { table } = LAYOUT;
-  const pages = [];
-  for (let i = 0; i < order.items.length; i += table.maxRowsPerPage) {
-    pages.push(order.items.slice(i, i + table.maxRowsPerPage));
-  }
-  if (pages.length === 0) pages.push([]); // orders with zero items still get an invoice
+  const pages = layoutItems(order.items, font);
 
   for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
     const templateDoc = await PDFDocument.load(templateBytes);
@@ -153,13 +197,13 @@ async function generateInvoicePDF(order) {
     drawTextLeft(page, font, fmtTime(order.created_at), LAYOUT.time.x, LAYOUT.time.yTop, pageHeight);
 
     // Line items
-    let yTop = table.firstRowYTop;
-    for (const item of pages[pageIdx]) {
-      drawTextLeft(page, font, item.name || "", table.desc.x, yTop, pageHeight);
-      drawTextRight(page, font, money(item.unit_price), table.unitPrice.rightX, yTop, pageHeight);
-      drawTextCenter(page, font, String(item.quantity), table.qty.centerX, yTop, pageHeight);
-      drawTextRight(page, font, money(item.subtotal), table.subtotal.rightX, yTop, pageHeight);
-      yTop += table.rowHeight;
+    for (const { item, lines, yTop, showAmounts } of pages[pageIdx]) {
+      lines.forEach((line, index) => drawTextLeft(page, font, line, table.desc.x, yTop + index * 12, pageHeight));
+      if (showAmounts) {
+        drawTextRight(page, font, money(item.unit_price), table.unitPrice.rightX, yTop, pageHeight);
+        drawTextCenter(page, font, String(item.quantity), table.qty.centerX, yTop, pageHeight);
+        drawTextRight(page, font, money(item.subtotal), table.subtotal.rightX, yTop, pageHeight);
+      }
     }
 
     // Payment method (regular weight, like other values) + total (bold,

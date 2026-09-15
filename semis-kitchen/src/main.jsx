@@ -7,12 +7,14 @@ import LegalPage from "./components/LegalPage.jsx";
 import { privacySections, termsSections } from "./content/legalContent.js";
 
 const Admin = lazy(() => import("./Admin.jsx"));
+const OfferPage = lazy(() => import("./components/OfferPage.jsx"));
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
+        <Route path="/o/:slug" element={<Suspense fallback={<p className="p-8">Loading offer…</p>}><OfferPage /></Suspense>} />
         <Route
           path="/privacy"
           element={<LegalPage title="Privacy Policy" description="How Semi's Kitchen collects, uses, stores, and protects customer information." canonicalPath="/privacy" sections={privacySections} />}

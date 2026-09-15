@@ -80,7 +80,7 @@ async function pushOrderRowsToSheet(rows, sheetName = "Orders") {
     }),
     r.name,
     r.phone,
-    r.total,
+    Number(r.total),
     r.payment_method,
   ]);
 
@@ -89,7 +89,9 @@ async function pushOrderRowsToSheet(rows, sheetName = "Orders") {
       {
         spreadsheetId,
         range: `${sheetName}!A1`,
-        valueInputOption: "USER_ENTERED",
+        // Keep names/phones literal (including leading '=' and '+'). Only the
+        // total is deliberately sent as a number so spreadsheet sums still work.
+        valueInputOption: "RAW",
         insertDataOption: "INSERT_ROWS",
         requestBody: { values },
       },
