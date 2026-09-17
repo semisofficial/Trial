@@ -48,9 +48,9 @@ try {
   await page.goto(base);
   await page.getByRole("button", { name: "Biriyani & Curries", exact: true }).click();
   await page.getByRole("button", { name: "Add", exact: true }).first().waitFor();
-  assert.match(await page.locator("main .group").first().innerText(), /1 combo/);
+  assert.match(await page.locator("main .group").first().innerText(), /1\s+combo/);
   await page.getByRole("button", { name: "Mains", exact: true }).click();
-  assert.equal(await page.locator("main .group").filter({ hasText: "1 combo" }).count(), 0);
+  assert.equal(await page.locator("main .group").filter({ hasText: /1\s+combo/ }).count(), 0);
   const chattipathiri = page.locator("main .group").filter({ hasText: "Chattipathiri" });
   assert.equal(await chattipathiri.count(), 1, "All Chattipathiri weights must share one card");
   assert.doesNotMatch(await chattipathiri.innerText(), /1 pack/i, "Chattipathiri's card must not show pack subtext");
@@ -72,7 +72,8 @@ try {
   await page.getByRole("button", { name: "Biriyani & Curries", exact: true }).click();
   await page.getByRole("button", { name: "Mains", exact: true }).click();
   const rice = page.locator("main .group").filter({ hasText: "Ghee Rice" });
-  assert.match(await rice.innerText(), /Photo coming soon/);
+  await rice.locator('img').scrollIntoViewIfNeeded();
+  await rice.locator('img').evaluate(img => img.decode());
   await rice.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("button", { name: "₹600", exact: true }).click();
   await page.getByRole("button", { name: "Proceed to checkout" }).click();

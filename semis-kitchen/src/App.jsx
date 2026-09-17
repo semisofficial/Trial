@@ -473,10 +473,12 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                   </div>
                 </div>
                 <div className="p-4 flex items-center justify-between gap-3">
-                  <div>
+                  <div className="min-w-0 flex-1">
                   <div className="text-lg text-[#3F3B24]" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>
                       {isChattipathiri ? "Chattipathiri" : item.name}
-                      {!isChattipathiri && <span className="text-stone-500 text-xs ml-1.5">{item.unit}</span>}
+                      {!isChattipathiri && <span className="inline-block max-w-full text-stone-500 text-xs ml-1.5">
+                        {item.unit?.replace(/(\d+(?:\.\d+)?)\s+(kg|gm?|pieces?|pack|combo)\b/gi, "$1\u00a0$2")}
+                      </span>}
                     </div>
                     <div className="text-[#C8754F] text-sm font-semibold mt-1">
                       {rupee(priceOf(item))}

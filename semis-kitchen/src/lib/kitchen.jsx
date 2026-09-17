@@ -126,7 +126,7 @@ export async function loadMenu() {
     stock: Number(item.stock),
     available: item.available !== false,
     seasonal: item.seasonal,
-    img: item.img,
+    img: imageForItem(item),
   }));
 
   // Hybrid: the live (authoritative) catalog is cached locally so the menu can
@@ -146,6 +146,28 @@ const MENU_IMAGES = import.meta.glob("/src/assets/images/*", {
   query: "?url",
   import: "default",
 });
+
+// Frontend defaults for dishes added before their photos were supplied.
+// Keep existing database photo references; no catalog/price migration is needed.
+const ITEM_PHOTOS = {
+  "mc-broasted-chicken": "broasted.jpeg",
+  "mc-ghee-rice": "ghee rice.jpeg",
+  "mc-butter-garlic-chicken": "butter garlic chicken.jpeg",
+  "mc-patthiri": "patthiri.jpeg",
+  "mc-chapatis": "chappati.jpeg",
+  "mc-chattipathiri-1kg": "chattipathiri.jpeg",
+  "mc-chattipathiri-1-5kg": "chattipathiri.jpeg",
+  "mc-chattipathiri-2kg": "chattipathiri.jpeg",
+  "mc-vegetable-stew": "vegetable stew.jpeg",
+  "fz-irachi-pathiri": "fz-iracch pathiri.jpeg",
+  "combo-broasted": "broasted quboos hummus.jpeg",
+  "combo-neypathal": "neypathal beef masala.jpeg",
+  "combo-batura": "batura butter chicken.jpeg",
+};
+
+function imageForItem(item) {
+  return item.img || ITEM_PHOTOS[item.id] || "";
+}
 
 /* Fallback mapping: fried & frozen snacks share the same photo. When a menu
    item's exact image file isn't present, fall back to the matching photo
@@ -288,7 +310,7 @@ function writeMenuCache(menu) {
 export function loadMenuStored() {
   const cached = readMenuCacheSync();
   const source = cached.length ? cached : MENU_SNAPSHOT;
-  return source.map((item) => ({ ...item, name: formatItemName(item.name) }));
+  return source.map((item) => ({ ...item, name: formatItemName(item.name), img: imageForItem(item) }));
 }
 
 export async function loadInventory() {
