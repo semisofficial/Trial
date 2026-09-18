@@ -27,7 +27,8 @@ async function fixture(mode = 'live') {
     if (url.pathname === '/api/menu' && mode !== 'live') return route.fulfill({ status: 503, json: { message: 'Offline test' } });
     return route.fulfill({ json: { success: true, data: url.pathname === '/api/menu' ? snapshot : [] } });
   });
-  if (mode === 'cache') await context.addInitScript(menu => localStorage.setItem('semis_menu_cache_v2', JSON.stringify(menu)), snapshot);
+  if (mode === 'cache') await context.addInitScript(menu => localStorage.setItem('semis_menu_cache_v2', JSON.stringify(menu)),
+    snapshot.map(item => item.id === 'fz-irachi-pathiri' ? { ...item, img: 'fz-iracch pathiri.jpeg' } : item));
   const page = await context.newPage();
   await page.goto(base);
   await page.getByRole('button', { name: 'Biriyani & Curries', exact: true }).click();
@@ -56,7 +57,7 @@ test('uploaded photos resolve for live, previously cached and bundled catalogs w
       assert.equal(await frozen.count(), 1);
       await frozen.scrollIntoViewIfNeeded();
       await frozen.evaluate(img => img.decode());
-      assert.ok(decodeURIComponent(await frozen.getAttribute('src')).includes('fz-iracch pathiri.jpeg'));
+      assert.ok(decodeURIComponent(await frozen.getAttribute('src')).includes('fz-irachi pathiri.jpeg'));
     } finally { await context.close(); }
   }
 });

@@ -14,6 +14,10 @@ services:
       - type: rewrite
         source: /invoice/*
         destination: https://api.semiskitchen.in/api/invoices/share/*
+      # Retired short links return to the regular menu without loading an old checkout.
+      - type: redirect
+        source: /o/*
+        destination: /
       # React Router SPA fallback; keep this after the API rewrites.
       - type: rewrite
         source: /*
@@ -23,9 +27,6 @@ services:
       - path: /*
         name: Content-Security-Policy
         value: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org; font-src 'self'; connect-src 'self' https://nominatim.openstreetmap.org; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
-      - path: /o/*
-        name: X-Robots-Tag
-        value: noindex, follow
       - path: /assets/*
         name: Cache-Control
         value: public, max-age=31536000, immutable

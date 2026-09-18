@@ -233,6 +233,8 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
   const keyHash = idempotencyKey
     ? crypto.createHash("sha256").update(idempotencyKey.toLowerCase()).digest("hex") : null;
   const requestHash = keyHash ? crypto.createHash("sha256").update(JSON.stringify({
+    // Retain the old hash format so previously saved checkouts remain retryable.
+    // This field no longer enables promotional pricing for new orders.
     customer: cleanCustomer, orderMode, offerSlug: offerSlug ?? null,
     items: [...requestedItems].sort((a, b) => a.id.localeCompare(b.id)),
   })).digest("hex") : null;
@@ -257,14 +259,13 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
         return { ...publicOrderRow(existing), customer: cleanCustomer, items: savedItems, replayed: true };
       }
     }
-    // A retry of an already-saved order must succeed even after its slot/offer ends.
+    // Old open tabs must refresh instead of silently ordering at a different price.
+    // Saved orders above can still replay their original prices, without the old table.
+    if (offerSlug != null) throw orderError("This promotion is no longer available. Please refresh and order from the regular menu.");
+    // A retry of an already-saved order must succeed even after its delivery slot ends.
     validateDeliveryDetails(cleanCustomer, orderMode);
     const authoritativeItems = await priceItems(client, requestedItems);
     validateMainsTiming(authoritativeItems, cleanCustomer, orderMode);
-    if (offerSlug != null) {
-      const { applyOfferToOrder } = require("./offerModel");
-      await applyOfferToOrder(client, offerSlug, authoritativeItems);
-    }
     const order = await insertOrder(client, {
       customer: cleanCustomer,
       items: authoritativeItems,

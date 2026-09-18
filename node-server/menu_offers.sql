@@ -162,17 +162,6 @@ BEGIN
   INSERT INTO app_migrations(name) VALUES ('shared-snack-stock-v1') ON CONFLICT DO NOTHING;
 END $$;
 
-CREATE TABLE IF NOT EXISTS offers (
-  slug text PRIMARY KEY,
-  title text NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
-  items jsonb NOT NULL CHECK (jsonb_typeof(items) = 'array'),
-  starts_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL DEFAULT (now() + interval '24 hours'),
-  closed boolean NOT NULL DEFAULT false,
-  CHECK (expires_at > starts_at)
-);
-CREATE INDEX IF NOT EXISTS idx_offers_expiry ON offers(expires_at);
-
 -- Apply safeguards to both fresh databases and the earlier incomplete bootstrap.
 -- Preserve existing invoice tokens; fill only missing ones. Invalid historical
 -- data causes an atomic rollback instead of silently deleting/correcting rows.

@@ -46,7 +46,6 @@ import {
   adminLogout,
 } from "./lib/kitchen.jsx";
 import { formatIndiaDate, indiaCalendarDateKey } from "./lib/dateTime.js";
-import OffersAdmin from "./components/OffersAdmin.jsx";
 
 /* ---------------------------------------------------------
    Admin dashboard (secret route /nashi)
@@ -517,7 +516,6 @@ const [section, setSection] = useState("orders");
             { id: "orders", label: "Orders" },
             { id: "invoices", label: "Invoices" },
             { id: "inventory", label: "Inventory" },
-            { id: "offers", label: "24-hour offers" },
             { id: "sales", label: "Sales" },
           ].map((s) => (
             <button
@@ -649,9 +647,19 @@ const [section, setSection] = useState("orders");
                     ))}
                   </div>
                   {o.customer.notes && <div className="text-xs text-green-800/50 italic mt-2 break-all">Note: {o.customer.notes}</div>}
-                  <div className="flex justify-between items-center mt-3 pt-3 border-t border-green-100">
+                  <div className="flex flex-wrap gap-3 justify-between items-center mt-3 pt-3 border-t border-green-100">
                     <span className="font-semibold text-amber-600">{rupee(o.total)}</span>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {(o.status === "accepted" || o.status === "completed") && (
+                        <button
+                          onClick={() => shareInvoiceOnWhatsApp(o.id, o.customer.phone, o.invoiceShareToken)}
+                          disabled={!o.invoiceShareToken}
+                          title={!o.invoiceShareToken ? "Invoice sharing token unavailable" : undefined}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Share2 className="w-3.5 h-3.5" /> Share on WhatsApp
+                        </button>
+                      )}
                       {o.status === "pending" && (
                         <>
                           <button
@@ -988,7 +996,6 @@ const weekLabel = (ts) => {
           );
         })()}
 
-        {section === "offers" && <OffersAdmin menu={menu.map((item) => ({ ...item, price: inventory[item.id]?.price ?? item.price }))} />}
 
         {section === "inventory" && (
           <div className="space-y-6">

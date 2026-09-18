@@ -19,7 +19,6 @@ import {
 import { applyDeliveryDateInput, deliveryDateIsUnavailable, mainsSundayBlocked } from "./lib/deliveryDate.js";
 import { floatingCartPlacement } from "./lib/floatingCart.js";
 import { checkoutAttempt } from "./lib/checkoutAttempt.js";
-import OfferLinks from "./components/OfferLinks.jsx";
 
 const LocationPicker = lazy(() => import("./components/LocationPicker.jsx"));
 
@@ -85,7 +84,7 @@ const CHATTIPATHIRI_WEIGHTS = [
 /* ---------------------------------------------------------
    Customer: Menu + Cart + Checkout
 --------------------------------------------------------- */
-export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu, offer = null, offerExpired = false }) {
+export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu }) {
   const [tab, setTab] = useState("fried");
   const [mainsTab, setMainsTab] = useState("all");
   const [chattipathiriId, setChattipathiriId] = useState(CHATTIPATHIRI_WEIGHTS[0].id);
@@ -206,7 +205,6 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
   const selectedSlotIsAvailable = availableDeliverySlots.some((slot) => slot.id === form.deliverySlot);
   const sundayBlocked = mainsSundayBlocked(cartLines, form.deliveryDate, form.mode);
   const checkoutOrder = {
-    ...(offer ? { offerSlug: offer.slug } : {}),
     items: cartLines.map((l) => ({ id: l.id, qty: l.qty })),
     customer: {
       name: form.name.trim(), phone: form.phone.trim(), address: form.address.trim(),
@@ -288,9 +286,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     setConfirmedOrder(order);
   };
 
-  const itemsForTab = useMemo(() => menu.filter((m) => offer || (m.cat === tab
-    && (tab !== "mains" || mainsTab === "all" || (mainsTab === "combos" ? m.isCombo : !m.isCombo))))
-    .sort((a, b) => Number(Boolean(b.isCombo)) - Number(Boolean(a.isCombo))), [menu, tab, mainsTab, offer]);
+  const itemsForTab = useMemo(() => menu.filter((m) => m.cat === tab
+    && (tab !== "mains" || mainsTab === "all" || (mainsTab === "combos" ? m.isCombo : !m.isCombo)))
+    .sort((a, b) => Number(Boolean(b.isCombo)) - Number(Boolean(a.isCombo))), [menu, tab, mainsTab]);
 
   // Group only the customer-facing card. Original IDs/quantities remain intact
   // for cart lines, server pricing, invoices and independent admin price edits.
@@ -301,12 +299,6 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     || chattipathiriOptions[0];
   const displayItems = itemsForTab.filter((item) => !CHATTIPATHIRI_WEIGHTS.some((weight) => weight.id === item.id)
     || item.id === chattipathiriOptions[0]?.id);
-
-  if (offerExpired && !pendingAttempt && !confirmedOrder) return (
-    <main className="min-h-screen bg-[#F6EDD7] text-[#3F3B24] flex items-center justify-center p-6 text-center">
-      <div><h1 className="text-3xl font-bold">Offer unavailable</h1><p className="my-4">This 24-hour offer has closed.</p><a className="underline" href="/">Order from the regular menu</a></div>
-    </main>
-  );
 
   return (
     <div className="customer-editorial relative min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
@@ -367,10 +359,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
       </header>
 
       {/* Category tabs */}
-      {!offer && <OfferLinks />}
       <section id="menu" className="bg-[#FFF8E8] pt-14 sm:pt-20">
         <div className="max-w-5xl mx-auto px-4 flex justify-center gap-2 overflow-x-auto pb-2">
-          {!offer && CATS.map((c) => {
+          {CATS.map((c) => {
             const active = tab === c.id;
             return (
               <button
@@ -385,7 +376,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
             );
           })}
         </div>
-        {!offer && tab === "mains" && (
+        {tab === "mains" && (
           <nav aria-label="Biriyani and curries sections" className="mt-4 flex justify-center gap-3">
             {[["all", "Combos & Mains"], ["combos", "Combos"], ["mains", "Mains"]].map(([id, label]) => (
               <button key={id} onClick={() => setMainsTab(id)} aria-pressed={mainsTab === id}
@@ -393,7 +384,6 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
             ))}
           </nav>
         )}
-        {offer && <div className="px-5 text-center"><h2 className="text-2xl font-bold">{offer.title}</h2><p>Bulk prices apply from each item's shown minimum quantity.</p><a href="/" className="underline">Regular menu</a></div>}
       </section>
 
       {/* Menu grid */}

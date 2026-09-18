@@ -62,14 +62,13 @@ test('same key with a different cart is rejected, while a fresh key permits a de
   assert.notEqual(first.id, repeat.id);
 });
 
-test('an accepted checkout can be retried after its offer closes', async () => {
-  const offers = require('../models/offerModel');
-  const offer = await offers.publishOffer({ title: 'Audit offer', items: [{ id: 'fz-irachi-pathiri', minQty: 10, price: 12 }] });
-  const input = { ...request(), offerSlug: offer.slug };
+test('an accepted checkout can be retried after its delivery date passes', async (t) => {
+  const input = request();
   const first = await orders.createOrder(input);
-  await fixture.query('UPDATE offers SET closed=true WHERE slug=$1', [offer.slug]);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 4 * 86400000 });
   assert.equal((await orders.createOrder(input)).id, first.id);
-  await assert.rejects(orders.createOrder({ ...input, idempotencyKey: randomUUID() }), /closed/);
+  await assert.rejects(orders.createOrder({ ...input, idempotencyKey: randomUUID() }),
+    error => error.code === 'INVALID_ORDER' && /Delivery date/.test(error.message));
 });
 
 test('a rolled-back checkout does not consume its key or leave a customer behind', async () => {

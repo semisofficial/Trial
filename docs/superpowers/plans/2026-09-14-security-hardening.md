@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - No live database writes, notifications, credential rotation, Git-history rewrite, commits, pushes or deployments in this implementation.
-- Preserve menu/offers changes, multiple admins, manual inventory, Sunday mixed-order rules, invoice/QR sharing and Google Sheets.
+- Preserve menu/inventory changes, multiple admins, manual inventory, Sunday mixed-order rules, invoice/QR sharing and Google Sheets.
 - WhatsApp automation stays disabled; no analytics, CAPTCHA or cookie banner.
 - No timer/cron querying Neon. Session validation is request-driven; health and anonymous menu browsing never query the session table.
 - Security migration is additive and re-runnable. Operator applies it before backend deployment.
@@ -27,7 +27,7 @@ Files: `node-server/security_hardening.sql`, `middleware/adminAuth.js`, `routes/
 - [x] Make `createSessionToken()` and `validSession(req)` async, add `revokeSession(req)`, and await every consumer. Memoize only for the same request object, never across HTTP requests.
 - [x] Add `no-store` to admin and private responses. Preserve HttpOnly, Secure in production and SameSite=Lax.
 - [x] Validate explicit proxy configuration; default to one hop on Render and no trusted proxy off Render. Test local forwarded-header spoofing; document that live proxy-chain verification is still required.
-- [x] Run `node --test test/security-auth.test.js test/regression.test.js test/menu-offers.test.js` and resolve regressions.
+- [x] Run `node --test test/security-auth.test.js test/regression.test.js test/menu-inventory.test.js` and resolve regressions.
 
 Example invariant:
 ```js
@@ -39,7 +39,7 @@ assert.equal((await fetch(base + '/api/admin/session', { headers: { cookie: logg
 Files: `models/orderModel.js`, `controllers/orderController.js`, `utils/emailNotify.js`, `utils/notificationBudget.js`, `security_hardening.sql`, `semis-kitchen/src/lib/checkoutAttempt.js`, `src/App.jsx`, `src/lib/kitchen.jsx`, and tests.
 
 - [x] Add failing tests for duplicate-item aggregation above 10,000; repeated same-key request; same key/different cart conflict; original price retained on retry; fresh key permits deliberate repeat; transaction rollback permits retry; no second email on replay.
-- [x] Add nullable indexed checkout-key and request hashes to orders (existing rows unchanged). Validate a UUID checkout key at the HTTP boundary. Inside the transaction acquire a per-key advisory lock, compare the canonical normalized request hash, and replay before applying current date/price/offer checks.
+- [x] Add nullable indexed checkout-key and request hashes to orders (existing rows unchanged). Validate a UUID checkout key at the HTTP boundary. Inside the transaction acquire a per-key advisory lock, compare the canonical normalized request hash, and replay before applying current date/price checks.
 - [x] Keep the key for an unchanged failed checkout, rotate after success or payload change; hold no customer data in persistent browser storage. Suppress simultaneous submit handlers with a ref.
 - [x] Validate aggregate quantities after combining duplicate IDs. Do not impose stock availability restrictions.
 - [x] Add one persistent email-budget row: at most 100 attempts per UTC day, at least 60 seconds apart. Budget exhaustion skips only the email, not the order; log a non-sensitive warning. Order replays never request another email.

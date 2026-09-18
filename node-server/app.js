@@ -70,7 +70,6 @@ app.use("/api", apiLimiter);
 app.use("/api/admin", authRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/inventory", inventoryRoutes);
-app.use("/api/offers", require("./routes/offerRoutes"));
 app.use("/api/orders", orderRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/invoices", invoiceRoutes);

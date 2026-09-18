@@ -1,20 +1,19 @@
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import "./index.css";
 import App from "./App.jsx";
 import LegalPage from "./components/LegalPage.jsx";
 import { privacySections, termsSections } from "./content/legalContent.js";
 
 const Admin = lazy(() => import("./Admin.jsx"));
-const OfferPage = lazy(() => import("./components/OfferPage.jsx"));
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<App />} />
-        <Route path="/o/:slug" element={<Suspense fallback={<p className="p-8">Loading offer…</p>}><OfferPage /></Suspense>} />
+        <Route path="/o/*" element={<Navigate to="/" replace />} />
         <Route
           path="/privacy"
           element={<LegalPage title="Privacy Policy" description="How Semi's Kitchen collects, uses, stores, and protects customer information." canonicalPath="/privacy" sections={privacySections} />}

@@ -10,7 +10,7 @@ const menu = snapshot.map((item) => ({ ...item, stock: 0, available: false, stoc
 // An admin price override must be reflected when switching weights.
 menu.find((item) => item.id === "mc-chattipathiri-1-5kg").price = 490;
 const inventory = menu.map((item) => ({ menu_item_id: item.id, stock: 0, selling_price: item.price, available: false, stock_group_id: item.stockGroupId }));
-let active = [];
+const offerRequests = [];
 let lastOrder;
 const checkoutKeys = [];
 const errors = [];
@@ -18,7 +18,7 @@ await context.route("**/api/**", async (route) => {
   const request = route.request();
   const pathname = new URL(request.url()).pathname;
   let data = [];
-  let extra = {};
+  if (pathname.startsWith('/api/offers')) offerRequests.push(pathname);
   if (pathname === "/api/menu") data = menu;
   else if (pathname === "/api/inventory") data = inventory;
   else if (pathname.startsWith("/api/inventory/") && request.method() === "PUT") {
@@ -33,12 +33,8 @@ await context.route("**/api/**", async (route) => {
     // Simulate a saved order whose response was lost. A retry must reuse its key.
     if (checkoutKeys.length === 1) return route.abort("failed");
     data = { id: "TEST-ONLY", invoice_id: "TEST-INVOICE", total: 240, items: lastOrder.items, status: "pending", created_at: new Date().toISOString() };
-  } else if (pathname === "/api/offers" && request.method() === "POST") {
-    data = { ...request.postDataJSON(), slug: "TESTDEAL", starts_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString() };
-    active = [data];
-  } else if (pathname === "/api/offers") { data = active; extra.serverNow = new Date().toISOString(); }
-  else if (pathname === "/api/offers/TESTDEAL") { data = active[0]; extra.serverNow = new Date().toISOString(); }
-  await route.fulfill({ contentType: "application/json", body: JSON.stringify({ success: true, data, ...extra }) });
+  }
+  await route.fulfill({ contentType: "application/json", body: JSON.stringify({ success: true, data }) });
 });
 await context.route(/https?:\/\/(?!127\.0\.0\.1|localhost).*/, (route) => route.abort());
 const page = await context.newPage();
@@ -48,6 +44,7 @@ try {
   await page.goto(base);
   await page.getByRole("button", { name: "Biriyani & Curries", exact: true }).click();
   await page.getByRole("button", { name: "Add", exact: true }).first().waitFor();
+  assert.deepEqual(offerRequests, [], 'The regular menu must not request retired offers');
   assert.match(await page.locator("main .group").first().innerText(), /1\s+combo/);
   await page.getByRole("button", { name: "Mains", exact: true }).click();
   assert.equal(await page.locator("main .group").filter({ hasText: /1\s+combo/ }).count(), 0);
@@ -97,18 +94,13 @@ try {
   await page.getByPlaceholder("Stock").first().press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll('input[placeholder="Stock"]')].filter((input) => input.value === "11").length === 2);
 
-  await page.getByRole("button", { name: "24-hour offers", exact: true }).click();
-  await page.getByRole("checkbox").first().check();
-  await page.getByLabel("Minimum pieces").fill("20");
-  await page.getByLabel("Offer ₹ per piece").fill("12");
-  await page.getByRole("button", { name: "Publish for 24 hours" }).click();
-  await page.getByText("Offer published.", { exact: false }).waitFor();
-  assert.equal(active[0].items[0].minQty, 20);
-  const shareUrl = new URL(await page.getByRole("link", { name: "Share on WhatsApp", exact: true }).getAttribute("href"));
-  assert.ok(shareUrl.searchParams.get("text").includes(`${new URL(base).origin}/o/TESTDEAL`), "Offer sharing must stay on the test origin");
+  assert.equal(await page.getByRole("button", { name: "24-hour offers", exact: true }).count(), 0);
   await page.goto(`${base}/o/TESTDEAL`);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await page.getByRole("button", { name: "₹240", exact: true }).click();
+  await page.waitForURL(`${base}/`);
+  await page.getByRole("button", { name: "Frozen Snacks", exact: true }).click();
+  const snack = page.locator('main .group').filter({ hasText: 'Irachi Pathiri' });
+  await snack.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "₹150", exact: true }).click();
   await page.getByRole("button", { name: "Proceed to checkout" }).click();
   await page.getByRole("button", { name: "Pickup", exact: true }).click();
   await page.getByPlaceholder("Full name").fill("Test Customer");
@@ -118,22 +110,21 @@ try {
   await page.locator("select").selectOption("12-13");
   await page.getByRole("button", { name: "Place order", exact: true }).click();
   await page.getByRole("alert").filter({ hasText: "couldn't place your order" }).first().waitFor();
-  // Advance past the offer's expiry and the selected delivery day. The server
+  // Advance past the selected delivery day. The server
   // can still replay an accepted request; the UI must retain its original key.
   await page.clock.fastForward(3 * 86400000);
   await page.getByPlaceholder("Full name").fill("Changed Customer");
-  assert.equal(await page.getByRole("button", { name: "Place order", exact: true }).isDisabled(), true, "Expired offers must not accept changed/new purchases");
+  await page.getByRole("button", { name: "Place order", exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'highlighted required fields' }).first().waitFor();
+  assert.equal(checkoutKeys.length, 1, 'A changed checkout must not bypass delivery-date validation');
   await page.getByPlaceholder("Full name").fill("Test Customer");
   await page.getByRole("button", { name: "Place order", exact: true }).click();
   await page.getByText("Order sent!", { exact: true }).waitFor();
   assert.match(checkoutKeys[0] || "", /^[0-9a-f-]{36}$/i);
   assert.equal(checkoutKeys[1], checkoutKeys[0], "Network retry must preserve the original checkout key");
-  assert.equal(lastOrder.offerSlug, "TESTDEAL");
-  assert.equal(lastOrder.items[0].qty, 20);
-  active[0].expires_at = new Date(Date.now() + 3000).toISOString();
-  await page.goto(`${base}/o/TESTDEAL`);
-  await page.getByRole("heading", { name: "Offer unavailable" }).waitFor({ timeout: 10000 });
-  assert.equal(await page.getByRole("button", { name: "Add", exact: true }).count(), 0);
+  assert.equal(lastOrder.offerSlug, undefined);
+  assert.equal(lastOrder.items[0].qty, 10);
+  assert.deepEqual(offerRequests, []);
   assert.deepEqual(errors, []);
-  console.log("Browser checks passed: single Chattipathiri card, weight prices/cart quantities, removed ordering section, combos, photos, zero-stock ordering, Sunday warning, shared integer stock, offer publishing/checkout/expiry, mobile width.");
+  console.log("Browser checks passed: Chattipathiri weights, combos, photos, zero-stock ordering, Sunday validation, shared integer stock, retired links, regular checkout retries, mobile width.");
 } finally { await browser.close(); }
