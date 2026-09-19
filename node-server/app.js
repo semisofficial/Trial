@@ -9,6 +9,7 @@ const orderRoutes = require("./routes/orderRoutes");
 const salesRoutes = require("./routes/salesRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
 const authRoutes = require("./routes/authRoutes");
+const paymentQrRoutes = require("./routes/paymentQrRoutes");
 const { apiLimiter } = require("./middleware/rateLimits");
 
 const app = express();
@@ -55,7 +56,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Idempotency-Key"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Idempotency-Key", "If-Match"]
 };
 app.use(cors(corsOptions));
 
@@ -73,6 +74,7 @@ app.use("/api/inventory", inventoryRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/invoices", invoiceRoutes);
+app.use("/api/payment-qr", paymentQrRoutes);
 
 // Platform health checks must not wake Neon or consume database CU-hours.
 app.get("/health", (req, res) => {

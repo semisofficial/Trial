@@ -5,6 +5,7 @@ import {
   Check,
   Phone,
   MapPin,
+  Menu,
   Lock,
   Package,
   Trash2,
@@ -46,6 +47,7 @@ import {
   adminLogout,
 } from "./lib/kitchen.jsx";
 import { formatIndiaDate, indiaCalendarDateKey } from "./lib/dateTime.js";
+import PaymentQrSettings from "./components/PaymentQrSettings.jsx";
 
 /* ---------------------------------------------------------
    Admin dashboard (secret route /nashi)
@@ -59,7 +61,8 @@ export default function Admin() {
   const [error, setError] = useState("");
   const [dashboardError, setDashboardError] = useState("");
   const [tab, setTab] = useState("pending");
-const [section, setSection] = useState("orders");
+  const [section, setSection] = useState("orders");
+  const [primaryNavOpen, setPrimaryNavOpen] = useState(false);
   const [invoiceGroup, setInvoiceGroup] = useState("recent"); // recent | day | week
   const [salesGroup, setSalesGroup] = useState("day"); // day | week
   // Flexible date-range filtering (all / day / week / month) applied to invoices & sales
@@ -113,6 +116,14 @@ const [section, setSection] = useState("orders");
       window.removeEventListener("semis-admin-unauthorized", lock);
       window.removeEventListener("semis-api-error", showApiError);
     };
+  }, []);
+
+  useEffect(() => {
+    const closePrimaryNav = (event) => {
+      if (event.key === "Escape") setPrimaryNavOpen(false);
+    };
+    window.addEventListener("keydown", closePrimaryNav);
+    return () => window.removeEventListener("keydown", closePrimaryNav);
   }, []);
 
   useEffect(() => {
@@ -488,12 +499,89 @@ const [section, setSection] = useState("orders");
     );
   };
 
+  const primarySections = [
+    { id: "orders", label: "Orders", index: "01" },
+    { id: "invoices", label: "Invoices", index: "02" },
+    { id: "inventory", label: "Inventory", index: "03" },
+    { id: "sales", label: "Sales", index: "04" },
+  ];
+  const selectPrimarySection = (id) => {
+    setSection(id);
+    setPrimaryNavOpen(false);
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="admin-dashboard-shell min-h-screen bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{FONTS}</style>
+
+      <aside
+        className={`admin-primary-nav ${primaryNavOpen ? "is-open" : ""}`}
+        aria-label="Admin sections"
+      >
+        <div className="admin-primary-nav__panel">
+          <div className="admin-primary-nav__heading">
+            <div>
+              <p className="admin-primary-nav__eyebrow">Kitchen dashboard</p>
+              <p className="admin-primary-nav__where">Where to?</p>
+            </div>
+            <button
+              type="button"
+              className="admin-primary-nav__close"
+              onClick={() => setPrimaryNavOpen(false)}
+              aria-label="Close admin navigation"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <nav className="admin-primary-nav__links" aria-label="Primary admin navigation">
+            {primarySections.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => selectPrimarySection(item.id)}
+                className={`admin-primary-nav__item ${section === item.id ? "is-active" : ""}`}
+                aria-current={section === item.id ? "page" : undefined}
+              >
+                <span>{item.label}</span>
+                <span className="admin-primary-nav__index">{item.index}</span>
+              </button>
+            ))}
+          </nav>
+
+          <div className="admin-primary-nav__footer">
+            <button type="button" onClick={signOut} className="admin-primary-nav__signout">
+              <span>Sign out</span>
+              <span aria-hidden="true">↗</span>
+            </button>
+            <p>Staff controls</p>
+          </div>
+        </div>
+      </aside>
+
+      <button
+        type="button"
+        className={`admin-primary-nav__backdrop ${primaryNavOpen ? "is-visible" : ""}`}
+        onClick={() => setPrimaryNavOpen(false)}
+        aria-label="Close admin navigation"
+        tabIndex={primaryNavOpen ? 0 : -1}
+      />
+
+      <div className="admin-dashboard-content min-h-screen flex flex-col">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-green-200 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Logo />
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              className="admin-primary-nav__trigger"
+              onClick={() => setPrimaryNavOpen(true)}
+              aria-expanded={primaryNavOpen}
+              aria-label="Open admin navigation"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <Logo />
+          </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-green-800/60 uppercase tracking-widest">Kitchen dashboard</span>
             <button
@@ -510,24 +598,6 @@ const [section, setSection] = useState("orders");
               ← Back to site
             </button>
           </div>
-        </div>
-        <div className="max-w-5xl mx-auto px-4 flex gap-1">
-          {[
-            { id: "orders", label: "Orders" },
-            { id: "invoices", label: "Invoices" },
-            { id: "inventory", label: "Inventory" },
-            { id: "sales", label: "Sales" },
-          ].map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSection(s.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                section === s.id ? "border-amber-400 text-amber-600" : "border-transparent text-green-800/60 hover:text-green-950"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
         </div>
       </header>
 
@@ -1203,18 +1273,12 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
                       })}
                     </div>
                   </div>
+              <PaymentQrSettings />
             </div>
           );
         })()}
       </main>
-      <footer className="flex justify-center px-4 pb-8 pt-2">
-        <button
-          onClick={signOut}
-          className="text-sm px-5 py-2 rounded-full bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors"
-        >
-          Sign out
-        </button>
-      </footer>
+      </div>
     </div>
   );
 }

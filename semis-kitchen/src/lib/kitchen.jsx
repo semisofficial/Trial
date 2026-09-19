@@ -169,6 +169,20 @@ function imageForItem(item) {
   return item.img || ITEM_PHOTOS[item.id] || "";
 }
 
+export async function loadPaymentQr() {
+  const res = await adminRequest('/payment-qr', { cache: 'no-store' });
+  return (await parseApiResponse(res, 'Unable to load payment QR')).data;
+}
+
+export async function savePaymentQr(file, version) {
+  const res = await adminRequest('/payment-qr', {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type, 'If-Match': `"${version}"` },
+    body: file,
+  });
+  return (await parseApiResponse(res, 'Unable to save payment QR')).data;
+}
+
 /* Fallback mapping: fried & frozen snacks share the same photo. When a menu
    item's exact image file isn't present, fall back to the matching photo
    that is available in src/assets/images/. */

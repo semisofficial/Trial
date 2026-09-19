@@ -7,6 +7,10 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     routes:
+      # Stable existing WhatsApp URL, now backed by the admin's saved QR.
+      - type: rewrite
+        source: /upi-qr.jpeg
+        destination: https://semiskitchenbe.onrender.com/api/payment-qr/image
       # Keep API calls first-party so the HttpOnly Admin session cookie works.
       - type: rewrite
         source: /api/*
@@ -23,6 +27,12 @@ services:
         source: /*
         destination: /index.html
     headers:
+      - path: /upi-qr.jpeg
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+      - path: /upi-qr.jpeg
+        name: X-Robots-Tag
+        value: noindex, nofollow, noarchive
       # First-party built scripts/fonts; Leaflet needs inline styles and these OSM services.
       - path: /*
         name: Content-Security-Policy
