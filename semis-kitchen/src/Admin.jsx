@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from 'react-router';
 import {
   X,
   Check,
   Phone,
   MapPin,
   Menu,
+  RefreshCw,
   Lock,
   Package,
   Trash2,
@@ -53,7 +53,6 @@ import PaymentQrSettings from "./components/PaymentQrSettings.jsx";
    Admin dashboard (secret route /nashi)
 --------------------------------------------------------- */
 export default function Admin() {
-  const navigate = useNavigate();
   const [unlocked, setUnlocked] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [loginPending, setLoginPending] = useState(false);
@@ -570,7 +569,7 @@ export default function Admin() {
       <div className="admin-dashboard-content min-h-screen flex flex-col">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-green-200 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               className="admin-primary-nav__trigger"
@@ -580,22 +579,20 @@ export default function Admin() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <Logo />
+            <div className="admin-header-logo min-w-0">
+              <Logo />
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-green-800/60 uppercase tracking-widest">Kitchen dashboard</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="hidden sm:inline text-xs text-green-800/60 uppercase tracking-widest">Kitchen dashboard</span>
             <button
+              type="button"
               onClick={refreshAll}
               title="Refresh orders, inventory & sales"
-              className="text-[11px] px-2.5 py-1 rounded-full bg-green-100 border border-green-300 text-green-800 hover:text-amber-600"
+              aria-label="Refresh orders, inventory and sales"
+              className="admin-header-refresh"
             >
-              ↻ Refresh
-            </button>
-            <button
-              onClick={() => navigate("/")}
-              className="text-[11px] px-2.5 py-1 rounded-full bg-green-100 border border-green-300 text-green-800 hover:text-amber-600"
-            >
-              ← Back to site
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -610,22 +607,31 @@ export default function Admin() {
         )}
         {section === "orders" && (
           <>
-            <div className="flex gap-2 mb-5 overflow-x-auto">
-              {["pending", "accepted", "declined", "completed"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={`px-3.5 py-2 rounded-lg text-sm font-medium whitespace-nowrap border ${
-                    tab === t ? "bg-amber-400 text-green-950 border-amber-400" : "border-green-300 bg-white text-green-800"
-                  }`}
-                >
-                  {STATUS[t].label} ({counts[t]})
-                </button>
-              ))}
+            <div className="mb-5">
+              <div className={`admin-order-status-tabs is-${tab}`} role="tablist" aria-label="Order status">
+                {["pending", "accepted", "declined", "completed"].map((t) => (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t}
+                    key={t}
+                    onClick={() => setTab(t)}
+                    className={`admin-order-status-tab status-${t} ${tab === t ? "is-active" : ""}`}
+                  >
+                    <span className="admin-order-status-tab__initial" aria-hidden="true">
+                      {STATUS[t].label.charAt(0)}
+                    </span>
+                    <span className="admin-order-status-tab__label">
+                      {STATUS[t].label}
+                    </span>
+                    <span className="admin-order-status-tab__count">({counts[t]})</span>
+                  </button>
+                ))}
+              </div>
               {(tab === "declined" || tab === "completed") && counts[tab] > 0 && (
                 <button
                   onClick={() => { if (confirm(`Move all ${counts[tab]} ${tab} order(s) to the archive for a fresh start?`)) clearTab(tab); }}
-                  className="px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap border border-red-300 text-red-600 bg-red-50 hover:bg-red-100"
+                  className="admin-order-clear mt-2 px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap border border-red-300 text-red-600 bg-red-50 hover:bg-red-100"
                 >
                   <Trash2 className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
                   Clear {STATUS[tab].label} ({counts[tab]})
