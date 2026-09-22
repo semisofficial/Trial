@@ -47,7 +47,6 @@ import {
   adminLogout,
 } from "./lib/kitchen.jsx";
 import { formatIndiaDate, indiaCalendarDateKey } from "./lib/dateTime.js";
-import PaymentQrSettings from "./components/PaymentQrSettings.jsx";
 import ItemsManager from "./components/ItemsManager.jsx";
 
 /* ---------------------------------------------------------
@@ -1101,7 +1100,7 @@ const weekLabel = (ts) => {
                             <div className="text-xs text-green-800/50">{item.unit}</div>
                             {isDraft && <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Draft</span>}
                           </div>
-                          {(item.cat !== "mains" || isDraft) && <button
+                          <button
                             onClick={() => toggleAvailability(item.id)}
                             disabled={isDraft && (!(Number(currentPrice) > 0) || available)}
                             aria-label={isDraft ? "Enable item" : undefined}
@@ -1110,7 +1109,7 @@ const weekLabel = (ts) => {
                             } disabled:cursor-not-allowed disabled:opacity-40`}
                           >
                             {isDraft ? "Enable item" : available ? "Production available" : "Production paused"}
-                          </button>}
+                          </button>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="flex items-center gap-1">
@@ -1291,7 +1290,6 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
                       })}
                     </div>
                   </div>
-              <PaymentQrSettings />
             </div>
           );
         })()}

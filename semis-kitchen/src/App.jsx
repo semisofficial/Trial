@@ -13,7 +13,6 @@ import {
   rupee,
   resolveImg,
   loadMenu,
-  loadMenuStored,
   createOrder,
 } from "./lib/kitchen.jsx";
 import { applyDeliveryDateInput, deliveryDateIsUnavailable, mainsSundayBlocked } from "./lib/deliveryDate.js";
@@ -223,8 +222,13 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
   // The backend still rejects new/unsaved expired purchases before inserting.
   const isPendingRetry = pendingAttempt?.fingerprint === JSON.stringify(checkoutOrder);
 
-  const submitOrder = async () => {
+  const submitOrder = async (retryOriginal = false) => {
     if (submittingRef.current) return;
+    // The fingerprint retains the exact unresolved payload in memory. Never
+    // rebuild a retry from a refreshed menu that may now hide an ordered item.
+    const order = retryOriginal === true && pendingAttempt
+      ? JSON.parse(pendingAttempt.fingerprint) : { ...checkoutOrder };
+    const isPendingRetry = pendingAttempt?.fingerprint === JSON.stringify(order);
     if (!liveReady && !isPendingRetry) {
       setErrorMsg("Please wait while we confirm current prices and availability.");
       return;
@@ -243,8 +247,12 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
       deliverySlot: !form.deliverySlot || (!isPendingRetry && !selectedSlotIsAvailable),
     };
     setCheckoutErrors(requiredErrors);
-    if (Object.values(requiredErrors).some(Boolean)) {
+    if (!isPendingRetry && Object.values(requiredErrors).some(Boolean)) {
       setErrorMsg("Please fill in or correct the highlighted required fields.");
+      return;
+    }
+    if (pendingAttempt && !isPendingRetry) {
+      setErrorMsg("Your previous order has not been confirmed yet. Retry the original order before submitting changes, or contact the kitchen.");
       return;
     }
     if (!isPendingRetry && hasMainsInCart && form.deliveryDate === indiaNow.date) {
@@ -259,7 +267,6 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     }
     setSubmitting(true);
     submittingRef.current = true;
-    const order = { ...checkoutOrder };
     try {
       const attempt = checkoutAttempt(pendingAttempt, order);
       setPendingAttempt(attempt);
@@ -271,6 +278,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
       order.status = created.status;
       order.createdAt = new Date(created.created_at).getTime();
     } catch (err) {
+      // These responses definitively rejected this attempt before saving it.
+      // Network/server uncertainty must retain the original key and payload.
+      if ([400, 429].includes(err.status)) setPendingAttempt(null);
       console.error("Failed to place order:", err);
       setSubmitting(false);
       submittingRef.current = false;
@@ -400,15 +410,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
             Please note: same-day delivery is not available for Biriyani &amp; Curry items.
           </p>
         )}
-        {menuState === "stale" && (
-          <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">
-            Live updates are temporarily unavailable. The saved menu is available to browse, but ordering is paused until prices and stock are confirmed.
-            <button onClick={onRetryMenu} className="ml-2 underline font-semibold">Retry</button>
-          </div>
-        )}
-        {!liveReady && menuState !== "stale" && (
+        {!liveReady && menuState === "loading" && (
           <div className="mb-5 rounded-xl border border-[#E8D7B5] bg-[#FFFCF3] px-4 py-3 text-center text-sm text-[#6F6657]" role="status">
-            Checking current prices and availability… You can browse while we refresh.
+            Checking current prices and availability…
           </div>
         )}
         {/* Menu grid — skeleton while the first load is in flight, a friendly
@@ -425,6 +429,8 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                 Try again
               </button>
             </div>
+          ) : menuState === "ready" ? (
+            <p className="py-8 text-center text-[#6F6657]" role="status">No items are available for ordering right now.</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" aria-busy="true" aria-label="Loading menu">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -764,6 +770,12 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
             {errorMsg && (
               <p role="alert" className="text-red-400 text-sm mt-2">{errorMsg}</p>
             )}
+            {pendingAttempt && !submitting && (
+              <div className="mt-3 rounded-lg border border-amber-400/50 p-3 text-sm text-amber-100">
+                <p>The previous submission is unconfirmed. Retry its original items and details to check the result without placing a second order.</p>
+                <button type="button" onClick={() => submitOrder(true)} className="mt-2 underline font-semibold">Retry original order</button>
+              </div>
+            )}
             <button
               disabled={
                 submitting ||
@@ -834,23 +846,21 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
    Homepage (customer site)
 --------------------------------------------------------- */
 export default function App() {
-  // Hybrid: start from the locally-cached catalog so the menu paints instantly
-  // even before the backend responds, then overlay the live inventory (price /
-  // stock / availability) via the refresh below. Falls back to an empty array
-  // on the very first visit (no cache yet), same as before.
-  const [menu, setMenu] = useState(() => loadMenuStored());
+  // Availability must be confirmed before displaying dishes: cached snapshots
+  // can contain products the kitchen has since paused.
+  const [menu, setMenu] = useState([]);
   const [inventory, setInventory] = useState({});
   const [liveReady, setLiveReady] = useState(false);
-  // "ready" if a cached catalog is already onscreen to show, else "loading".
-  // Only the very first visit (no cache yet) ever shows the loading skeleton;
-  // returning visitors start "ready" and the live refresh just updates in place.
-  const [menuState, setMenuState] = useState(() => (menu.length ? "ready" : "loading"));
+  const [menuState, setMenuState] = useState("loading");
+  const menuRequest = useRef(0);
 
   const refreshMenu = useCallback(async () => {
+    const request = ++menuRequest.current;
     setLiveReady(false);
     setMenuState("loading");
     try {
       const liveMenu = await loadMenu();
+      if (request !== menuRequest.current) return;
       setMenu(liveMenu);
       setInventory(Object.fromEntries(liveMenu.map((item) => [item.id, {
         stock: item.stock,
@@ -860,18 +870,26 @@ export default function App() {
       setLiveReady(true);
       setMenuState("ready");
     } catch {
+      if (request !== menuRequest.current) return;
       setLiveReady(false);
-      setMenu((current) => {
-        setMenuState(current.length ? "stale" : "error");
-        return current;
-      });
+      setMenu([]);
+      setMenuState("error");
     }
   }, []);
   useEffect(() => {
     const timer = setTimeout(() => {
       refreshMenu();
     }, 0);
-    return () => clearTimeout(timer);
+    const refreshVisible = () => { if (document.visibilityState === "visible") refreshMenu(); };
+    const poll = setInterval(refreshVisible, 60000);
+    window.addEventListener('focus', refreshVisible);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(poll);
+      window.removeEventListener('focus', refreshVisible);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
   }, [refreshMenu]);
 
   return (

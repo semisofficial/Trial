@@ -35,8 +35,8 @@ async function fixture(mode = 'live') {
   return { context, page };
 }
 
-test('uploaded photos resolve for live, previously cached and bundled catalogs without DB image values', async () => {
-  for (const mode of ['live', 'cache', 'snapshot']) {
+test('uploaded photos resolve for live catalogs without DB image values', async () => {
+  for (const mode of ['live']) {
     const { context, page } = await fixture(mode);
     try {
       for (const [name, filename] of photos) {

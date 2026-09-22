@@ -92,7 +92,7 @@ function customer() {
 }
 
 test("orders above stock and at zero stock succeed without deducting inventory or restoring it on decline", async () => {
-  await inventory.updateInventory("frozen-beef", { stock: 0, available: false });
+  await inventory.updateInventory("frozen-beef", { stock: 0, available: true });
   const order = await orders.createOrder({ customer: customer(), items: [{ id: "frozen-beef", qty: 40 }], orderMode: "Delivery" });
   assert.equal(Number(order.total), 600);
   assert.equal(order.stock_reserved, false);

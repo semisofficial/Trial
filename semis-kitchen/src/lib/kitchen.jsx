@@ -7,7 +7,6 @@ import {
   Flame,
   Soup,
 } from "lucide-react";
-import MENU_SNAPSHOT from "../menuSnapshot.js";
 
 // API base URL. Render uses the relative "/api" path and forwards it to the
 // backend through render.yaml. Local development uses the Vite proxy in
@@ -129,16 +128,9 @@ function mapMenuItems(data) {
 }
 
 export async function loadMenu() {
-  const res = await fetch(`${API}/menu`);
+  const res = await fetch(`${API}/menu`, { cache: 'no-store' });
   const json = await parseApiResponse(res, "Unable to load the menu");
-  const menu = mapMenuItems(json.data);
-
-  // Hybrid: the live (authoritative) catalog is cached locally so the menu can
-  // paint instantly on later visits even before the backend responds. New live
-  // data always overwrites the cache, so real item ids + current
-  // price/stock/availability stay in sync. Fire-and-forget on purpose — don't
-  // delay the menu returning just to persist the cache.
-  writeMenuCache(menu);
+  const menu = mapMenuItems(json.data).filter(item => item.available && !item.isDraft);
 
   return menu;
 }
@@ -177,20 +169,6 @@ const ITEM_PHOTOS = {
 
 export function imageForItem(item) {
   return item.img || ITEM_PHOTOS[item.id] || "";
-}
-
-export async function loadPaymentQr() {
-  const res = await adminRequest('/payment-qr', { cache: 'no-store' });
-  return (await parseApiResponse(res, 'Unable to load payment QR')).data;
-}
-
-export async function savePaymentQr(file, version) {
-  const res = await adminRequest('/payment-qr', {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type, 'If-Match': `"${version}"` },
-    body: file,
-  });
-  return (await parseApiResponse(res, 'Unable to save payment QR')).data;
 }
 
 /* Fallback mapping: fried & frozen snacks share the same photo. When a menu
@@ -298,51 +276,6 @@ export const STATUS = {
 export function rupee(n) {
   return `₹${n.toLocaleString("en-IN")}`;
 }
-/* Read the last-known menu cache from this browser. Orders themselves are
-   always stored authoritatively in PostgreSQL, never in localStorage. */
-function readLocal(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-/* ---------------------------------------------------------
-   Menu catalog cache — the "static catalog" half of the hybrid.
-   After every successful live load, the authoritative menu (real
-   ids + current price/stock/availability) is saved here so the
-   customer page can render it instantly on later visits, then the
-   fresh /api/menu inventory overlay refreshes it. Item ids
-   are the backend's real ids, so orders and admin inventory edits
-   keep working unchanged. localStorage is synchronous so React can
-   seed its state from the cache on the first paint.
---------------------------------------------------------- */
-const MENU_CACHE_KEY = "semis_menu_cache_v2";
-
-function readMenuCacheSync() {
-  const v = readLocal(MENU_CACHE_KEY);
-  return Array.isArray(v) ? v : [];
-}
-
-function writeMenuCache(menu) {
-  if (!Array.isArray(menu)) return;
-  try {
-    localStorage.setItem(MENU_CACHE_KEY, JSON.stringify(menu));
-  } catch {
-    /* Never let a cache write break the live fetch. */
-  }
-}
-
-/* Last-known catalog, read synchronously for an instant first paint.
-   The live inventory overlay (price/stock/availability) is applied on
-   top by the caller via the regular loadMenu refresh. */
-export function loadMenuStored() {
-  const cached = readMenuCacheSync();
-  const source = cached.length ? cached : MENU_SNAPSHOT;
-  return source.map((item) => ({ ...item, name: formatItemName(item.name), img: imageForItem(item) }));
-}
-
 function mapInventory(data) {
   const inv = {};
   data.forEach((item) => {

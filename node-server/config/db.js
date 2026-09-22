@@ -3,7 +3,7 @@ const { Pool } = require("pg");
 const MAX_CONNECTIONS = 2;
 const IDLE_CLIENT_TIMEOUT_MS = 30_000;
 // Allow enough time for a sleeping Neon compute to wake up. The customer app
-// renders its bundled menu while this connection is established.
+// waits for live availability before displaying menu items.
 const CONNECTION_TIMEOUT_MS = 15_000;
 
 function databaseConfig() {

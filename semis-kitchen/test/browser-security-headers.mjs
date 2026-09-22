@@ -33,8 +33,8 @@ try {
     const url = new URL(route.request().url());
     if (url.origin === base && url.pathname.startsWith('/api/')) {
       let data = [];
-      if (url.pathname === '/api/menu') data = snapshot;
-      if (url.pathname === '/api/inventory') data = snapshot.map(item => ({ menu_item_id: item.id, selling_price: item.price, stock: 0, available: true }));
+      if (url.pathname === '/api/menu' || url.pathname === '/api/menu/admin') data = snapshot;
+      if (url.pathname === '/api/inventory' || url.pathname === '/api/inventory/admin') data = snapshot.map(item => ({ menu_item_id: item.id, selling_price: item.price, stock: 0, available: true }));
       return route.fulfill({ json: { success: true, authenticated: true, data, serverNow: new Date().toISOString() } });
     }
     if (/^[abc]\.tile\.openstreetmap\.org$/.test(url.hostname)) return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC1sAAAAASUVORK5CYII=', 'base64') });
@@ -65,6 +65,7 @@ try {
   assert.equal(await page.locator('.leaflet-marker-icon').evaluate(img => img.complete && img.naturalWidth > 0), true);
   assert.deepEqual(await page.evaluate(() => window.policyViolations), []);
   await page.goto(`${base}/nashi`);
+  await page.getByRole('button', { name: 'Open admin navigation' }).click();
   await page.getByRole('button', { name: 'Inventory', exact: true }).click();
   await page.getByPlaceholder('Stock').first().waitFor();
   assert.deepEqual(errors, []);

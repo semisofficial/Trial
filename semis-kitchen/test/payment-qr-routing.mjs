@@ -31,25 +31,22 @@ try {
   });
   await vite.listen();
   const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
-  const oldImage = await readFile(new URL('../../node-server/assets/upi-qr.jpeg', import.meta.url));
+  const oldImage = await readFile(new URL('../../node-server/assets/upi-qr.png', import.meta.url));
   const fallback = await fetch(`${base}/upi-qr.jpeg`, { signal: AbortSignal.timeout(10000) });
-  assert.equal(fallback.headers.get('content-type'), 'image/jpeg');
+  assert.equal(fallback.headers.get('content-type'), 'image/png');
   assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), oldImage);
   const signedIn = await fetch(`${base}/api/admin/login`, { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: process.env.ADMIN_PASSWORD }) });
   assert.equal(signedIn.status, 200);
   const cookie = signedIn.headers.get('set-cookie').split(';')[0];
   const saved = await fetch(`${base}/api/payment-qr`, { method: 'PUT',
-    headers: { cookie, 'Content-Type': 'image/jpeg', 'If-Match': '"default"' }, body: oldImage });
-  assert.equal(saved.status, 200);
-  const { data } = await saved.json();
-  const live = await fetch(`${base}/upi-qr.jpeg?v=${data.version}`);
+    headers: { cookie, 'Content-Type': 'image/jpeg', 'If-Match': '"default"' }, body: Buffer.from('upload-disabled') });
+  assert.equal(saved.status, 404);
+  const live = await fetch(`${base}/upi-qr.jpeg?v=old-cached-version`);
   assert.equal(live.status, 200);
-  assert.equal(live.headers.get('etag'), `"${data.version}"`);
-  assert.equal(live.headers.get('content-type'), 'image/jpeg');
-  const expected = (await fixture.query('SELECT image FROM payment_qr WHERE id = 1')).rows[0].image;
-  assert.deepEqual(Buffer.from(await live.arrayBuffer()), Buffer.from(expected));
-  console.log('PASS: existing public QR URL serves fallback and persistent replacement through real Vite/API routing.');
+  assert.equal(live.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await live.arrayBuffer()), oldImage);
+  console.log('PASS: stable public QR URL serves only the bundled image through real Vite/API routing; uploads are rejected.');
 } finally {
   await vite?.close();
   if (api) { api.closeAllConnections(); await new Promise(resolve => api.close(resolve)); }

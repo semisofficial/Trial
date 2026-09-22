@@ -1,69 +1,26 @@
-# Admin payment QR replacement
+# Production availability and repository-owned payment QR
 
-Sales now includes a Payment QR card: choose a PNG/JPEG, preview it, verify the
-payment account, confirm, and save. Cancel does not publish. The saved image is
-shared by all admins and survives backend restarts/redeployments.
+## Changes
 
-## Rollout (not performed automatically)
+- Production paused hides an item from the public menu/inventory. Admin retains its name, photo, price and stock; production available restores it. Mains now also have the toggle.
+- Checkout checks availability transactionally, including old carts. Existing saved order retries still replay the same order (they do not place a second order).
+- Customer menu and slideshow wait for live availability; browser snapshots are no longer displayed. The page shell still loads immediately. An open, visible page refreshes once per minute and when focused; this is not instant server push. Checkout always checks current availability. A failed refresh hides stale items until retry succeeds.
+- Sales no longer has a QR uploader. The QR management/upload endpoints and writable model are removed, not merely hidden in the UI. Historical database overrides are ignored.
+- `node-server/assets/upi-qr.png` is the exact supplied image, showing UPI ID `semisofficial1@okhdfcbank`. Future changes require repository access and a deployment. Menu-photo uploads remain available in Items.
+- Existing `/upi-qr.jpeg` WhatsApp links remain valid. The response is correctly labelled `image/png`; the legacy URL extension is retained for compatibility.
 
-1. Back up the intended Neon branch. Confirm which branch the live backend uses;
-   a local server pointed at that branch also writes live data.
-2. Use Node 22.12+ (22.x) or Node 24.x; the backend engine range is now explicit
-   for Sharp compatibility. Ensure no Render `NODE_VERSION` or version file pins
-   Node 18/20. In `node-server`, install dependencies with `npm ci`. Apply the additive,
-   re-runnable migration to that intended branch:
+## Deployment
 
-   ```powershell
-   node migrate.js payment_qr.sql
-   ```
+1. No new migration or environment variable is required for this patch. The existing Items feature still requires `items_management.sql` if it has not already been installed. Do not rerun seed scripts.
+2. Deploy the backend first, then the frontend. Confirm the Render static-site rewrite `/upi-qr.jpeg` still points to `https://semiskitchenbe.onrender.com/api/payment-qr/image` ahead of the SPA fallback. Do not add a public frontend file at that path, which could shadow the rewrite.
+3. Open the live QR URL and scan it without completing a payment. Confirm the recipient and UPI ID with the owner. Existing downloaded images or WhatsApp previews cannot be recalled or forced to update.
+4. Verify login, pause/resume for snacks and mains, public menu, an old cart, order acceptance, invoice/WhatsApp sharing and Sheets sync. A customer with an already open tab can see the previous menu until the next refresh (up to a minute while visible), but cannot submit a new paused-item order.
+5. Confirm `/health`, correct pooled Neon URL, session secrets, allowed origins and proxy settings in the live Render dashboard. Source/build checks cannot verify those live values.
 
-   This creates one settings row. It does not modify orders, menu, stock, prices,
-   invoices, or the original bundled QR. Before migration, the original image
-   still works and the Sales tab explains that uploads need database setup.
-3. Deploy the backend first. Check `/api/payment-qr/image` returns the current
-   image and the authenticated Sales settings request works.
-4. Sync the Render Blueprint routing change, then deploy the frontend. Ensure
-   the static site's `/upi-qr.jpeg` **Rewrite** points to
-   `https://semiskitchenbe.onrender.com/api/payment-qr/image` before the SPA
-   fallback. If managing routes manually, add this exact rewrite in Render.
-   A code redeploy alone is not proof the service's route settings were synced.
-5. Open `https://semiskitchen.in/upi-qr.jpeg` and confirm it displays an image,
-   not HTML. The old static frontend asset moved to `node-server/assets` so it
-   cannot shadow the new rewrite. Do not redeploy an old frontend after admins
-   start replacing QR images: it would serve its old bundled image again.
-6. In Sales, upload the intended real QR, preview/confirm/save, reopen the public
-   link, and scan it to check the correct recipient. Do not publish a test
-   account to production. Test cancel and refresh without changing payment data.
+`payment_qr.sql` remains only as historical migration documentation/test compatibility. The old table is unused; no production data is dropped by this patch. No QR migration is needed. Database cleanup, if desired, should be separately backed up and approved.
 
-## Limits and safety
+## Hosting and consumption
 
-- Admin authentication and allowed-origin checks protect uploads; upload rate
-  limit: 20 per hour per IP. Only one image conversion runs per backend process;
-  simultaneous conversions receive a retry message rather than filling a queue.
-  A stale admin version cannot overwrite a newer QR.
-- PNG/JPEG only, up to 1 MiB, 128–2048 pixels on each side. No SVG or animation.
-- Sharp decodes/re-encodes to JPEG at high quality, removes metadata, and keeps
-  dimensions/quiet zones. No cropping/resizing. Re-scan after saving: format
-  validation cannot verify ownership of a payment account or guarantee scanability.
-- One current image, maximum 512 KiB in PostgreSQL, plus small row metadata.
-  Replacement updates that row, not an image per invoice. PostgreSQL history,
-  WAL and backups can temporarily retain old versions as normal.
-- One cached image per backend process. Public reads check only the small
-  revision row, fetch image bytes when changed, and support conditional 304
-  responses. There is no polling timer or image request on customer menu load.
-- A database outage returns an error rather than silently serving a potentially
-  obsolete payment account. Missing migration alone permits the initial fallback.
-- The public link stays the same, including existing WhatsApp messages. Previously
-  downloaded images or WhatsApp previews cannot be recalled/forced to refresh.
-- Invoices, message text/order, sales totals, and WhatsApp auto-notification flag
-  are unchanged. No new credentials, paid storage service, or persistent disk.
+Render keeps the existing static frontend and Starter Node backend configuration. The QR no longer queries Neon, reducing QR-view database traffic. Availability uses uncached menu reads: at most one scheduled refresh per minute per visible tab, plus page loads/focus refreshes. This can keep Neon active while customers leave the site visible. Photos remain independently cacheable.
 
-## Local verification
-
-Backend tests use in-memory PGlite, never `.env` or live Neon. From `node-server`:
-`npm test`. Frontend: `npm run lint`, `npm run build`,
-`node --test test/*.test.mjs`. Browser scripts accept `PLAYWRIGHT_MODULE` if
-Playwright is supplied externally; `browser-payment-qr.mjs` accepts
-`TEST_SITE_URL` (default local Vite on port 5184). All its API calls are
-intercepted. `node test/payment-qr-routing.mjs` starts isolated Vite/Express
-servers with in-memory PostgreSQL to test the actual public-link rewrite.
+Render reference checks: https://render.com/docs/web-services (PORT/0.0.0.0), https://render.com/docs/health-checks, https://render.com/docs/blueprint-spec.

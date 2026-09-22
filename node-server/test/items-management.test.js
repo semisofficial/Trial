@@ -93,7 +93,7 @@ test('metadata rejects price, stock, HTML-like image paths, invalid categories a
 });
 
 test('photo upload is protected, bounded, versioned and survives model reload without image history', async () => {
-  const photo = fs.readFileSync(path.join(__dirname, '../assets/upi-qr.jpeg'));
+  const photo = await require('sharp')(fs.readFileSync(path.join(__dirname, '../assets/upi-qr.png'))).jpeg().toBuffer();
   const upload = (body, type, revision, withCookie = true) => fetch(`${base}/items/${created.id}/photo`, {
     method: 'PUT', headers: { ...(withCookie ? { cookie } : {}), 'Content-Type': type, 'If-Match': `"${revision}"` }, body });
   assert.equal((await upload(photo, 'image/jpeg', created.revision, false)).status, 401);

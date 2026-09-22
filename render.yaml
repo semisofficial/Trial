@@ -7,7 +7,7 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     routes:
-      # Stable existing WhatsApp URL, now backed by the admin's saved QR.
+      # Stable WhatsApp URL; serves only the developer-maintained bundled QR.
       - type: rewrite
         source: /upi-qr.jpeg
         destination: https://semiskitchenbe.onrender.com/api/payment-qr/image

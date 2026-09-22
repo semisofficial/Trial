@@ -61,7 +61,7 @@ try {
   await page.goto(`${base}/nashi`);
   await page.evaluate(() => { window.sharedLinks = []; window.open = url => window.sharedLinks.push(url); });
   for (const [status, label, phone] of [['accepted', 'Accepted', '919876543211'], ['completed', 'Completed', '919876543212']]) {
-    await page.getByRole('button', { name: `${label} (1)`, exact: true }).click();
+    await page.getByRole('tab', { name: `${label} (1)`, exact: true }).click();
     await page.getByText(`Customer ${status}`, { exact: true }).waitFor();
     const button = page.getByRole('button', { name: 'Share on WhatsApp', exact: true });
     assert.equal(await button.count(), 1, `${label} order cards need a share button`);
@@ -79,7 +79,7 @@ try {
     assert.ok(box.x >= 0 && box.x + box.width <= 360, 'Share button must fit the mobile viewport');
   }
   for (const label of ['Pending', 'Declined']) {
-    await page.getByRole('button', { name: `${label} (1)`, exact: true }).click();
+    await page.getByRole('tab', { name: `${label} (1)`, exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Share on WhatsApp', exact: true }).count(), 0);
   }
   console.log('PASS: direct customer chat, requested message layout, QR before invoice, token guard and decline message.');

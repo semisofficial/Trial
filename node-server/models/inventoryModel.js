@@ -8,7 +8,7 @@ async function getInventory(includeDrafts = false) {
       COALESCE(m.stock_group_id, m.id) AS stock_group_id
     FROM inventory i JOIN menu_items m ON m.id = i.menu_item_id
     LEFT JOIN inventory s ON s.menu_item_id = COALESCE(m.stock_group_id, m.id)
-    WHERE NOT m.retired AND ($1::boolean OR NOT m.is_draft) ORDER BY i.menu_item_id
+    WHERE NOT m.retired AND ($1::boolean OR (NOT m.is_draft AND i.available)) ORDER BY i.menu_item_id
   `, [includeDrafts]);
 
   return result.rows;

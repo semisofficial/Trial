@@ -4,10 +4,9 @@ exports.getMenu = async (req, res) => {
   try {
     const menu = await menuModel.getMenu();
 
-    // The frontend may serve a recent catalog immediately while refreshing it in
-    // the background. Checkout remains authoritative and revalidates current
-    // prices and stock transactionally before accepting an order.
-    res.set("Cache-Control", "public, s-maxage=30, stale-while-revalidate=86400");
+    // Never let an edge cache keep paused dishes visible. Checkout independently
+    // revalidates availability and prices inside its transaction.
+    res.set("Cache-Control", "no-store");
 
     res.json({
       success: true,
