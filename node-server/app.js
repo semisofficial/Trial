@@ -10,6 +10,7 @@ const salesRoutes = require("./routes/salesRoutes");
 const invoiceRoutes = require("./routes/invoiceRoutes");
 const authRoutes = require("./routes/authRoutes");
 const paymentQrRoutes = require("./routes/paymentQrRoutes");
+const itemsRoutes = require("./routes/itemsRoutes");
 const { apiLimiter } = require("./middleware/rateLimits");
 
 const app = express();
@@ -75,6 +76,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/payment-qr", paymentQrRoutes);
+app.use("/api/items", itemsRoutes);
 
 // Platform health checks must not wake Neon or consume database CU-hours.
 app.get("/health", (req, res) => {

@@ -10,10 +10,11 @@ function isTransientConnectionError(error) {
     || /connection terminated|connection timeout|connection terminated unexpectedly/i.test(error?.message || "");
 }
 
-async function queryMenu() {
+async function queryMenu(includeDrafts) {
   return db.query(`
     SELECT
       m.id,
+      m.is_draft AS "isDraft",
       m.is_combo AS "isCombo",
       COALESCE(m.stock_group_id, m.id) AS "stockGroupId",
       m.category_id AS cat,
@@ -25,28 +26,29 @@ async function queryMenu() {
       m.min_qty AS "minQty",
       m.step_qty AS "step",
       m.seasonal,
-      m.image AS img,
+      CASE WHEN p.menu_item_id IS NOT NULL THEN '/api/items/' || m.id || '/photo?v=' || p.revision::text ELSE m.image END AS img,
       COALESCE(i.selling_price, m.default_price) AS price,
       CASE WHEN m.category_id = 'mains' THEN NULL ELSE FLOOR(COALESCE(si.stock, 0)) END AS stock,
       COALESCE(i.available, true) AS available
     FROM menu_items m
     JOIN categories c ON c.id = m.category_id
     LEFT JOIN inventory i ON i.menu_item_id = m.id
+    LEFT JOIN item_photos p ON p.menu_item_id = m.id
     LEFT JOIN inventory si ON si.menu_item_id = COALESCE(m.stock_group_id, m.id)
-    WHERE NOT m.retired
+    WHERE NOT m.retired AND ($1::boolean OR NOT m.is_draft)
     ORDER BY c.id, m.is_combo DESC, m.name;
-  `);
+  `, [includeDrafts]);
 }
 
-async function getMenu() {
+async function getMenu(includeDrafts = false) {
   let result;
   try {
-    result = await queryMenu();
+    result = await queryMenu(includeDrafts);
   } catch (error) {
     if (!isTransientConnectionError(error)) throw error;
     // A menu read is idempotent, so one retry is safe after Neon wakes or a
     // pooled connection is replaced. Never apply this pattern to order writes.
-    result = await queryMenu();
+    result = await queryMenu(includeDrafts);
   }
   return result.rows;
 }

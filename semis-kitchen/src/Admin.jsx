@@ -24,8 +24,8 @@ import {
   Logo,
   StatusPill,
   rupee,
-  loadMenu,
-  loadInventory,
+  loadAdminMenu,
+  loadAdminInventory,
   updateInventoryField,
   fetchOrders,
   fetchArchivedOrders,
@@ -48,6 +48,7 @@ import {
 } from "./lib/kitchen.jsx";
 import { formatIndiaDate, indiaCalendarDateKey } from "./lib/dateTime.js";
 import PaymentQrSettings from "./components/PaymentQrSettings.jsx";
+import ItemsManager from "./components/ItemsManager.jsx";
 
 /* ---------------------------------------------------------
    Admin dashboard (secret route /nashi)
@@ -82,8 +83,8 @@ export default function Admin() {
   const [invoiceBatchInfo, setInvoiceBatchInfo] = useState({ totalInvoices: 0, batchSize: 3, totalBatches: 0 });
   const [downloadingBatch, setDownloadingBatch] = useState(null);
 
-  const refreshMenu = useCallback(async () => setMenu(await loadMenu()), []);
-  const refreshInventory = useCallback(async () => setInventory(await loadInventory()), []);
+  const refreshMenu = useCallback(async () => setMenu(await loadAdminMenu()), []);
+  const refreshInventory = useCallback(async () => setInventory(await loadAdminInventory()), []);
   // In-flight optimistic status overrides (orderId -> status). These are merged
   // into the fetched list so a stale server snapshot (captured while an accept/decline
   // request is still in flight) can't clobber the optimistic status back to pending.
@@ -234,6 +235,7 @@ export default function Admin() {
     setInventory((prev) => ({ ...prev, [itemId]: { ...prev[itemId], available: !wasAvailable } }));
     try {
       await updateInventoryField(itemId, { available: !wasAvailable });
+      await Promise.all([refreshMenu(), refreshInventory()]);
     } catch {
       setInventory((prev) => ({ ...prev, [itemId]: { ...prev[itemId], available: wasAvailable } }));
     }
@@ -501,8 +503,9 @@ export default function Admin() {
   const primarySections = [
     { id: "orders", label: "Orders", index: "01" },
     { id: "invoices", label: "Invoices", index: "02" },
-    { id: "inventory", label: "Inventory", index: "03" },
-    { id: "sales", label: "Sales", index: "04" },
+    { id: "items", label: "Items", index: "03" },
+    { id: "inventory", label: "Inventory", index: "04" },
+    { id: "sales", label: "Sales", index: "05" },
   ];
   const selectPrimarySection = (id) => {
     setSection(id);
@@ -543,7 +546,7 @@ export default function Admin() {
                 aria-current={section === item.id ? "page" : undefined}
               >
                 <span>{item.label}</span>
-                <span className="admin-primary-nav__index">{item.index}</span>
+                <span className="admin-primary-nav__index" aria-hidden="true">{item.index}</span>
               </button>
             ))}
           </nav>
@@ -1073,6 +1076,10 @@ const weekLabel = (ts) => {
         })()}
 
 
+        {section === "items" && (
+          <ItemsManager onChanged={refreshAll} onGoToInventory={() => selectPrimarySection("inventory")} />
+        )}
+
         {section === "inventory" && (
           <div className="space-y-6">
             {CATS.map((c) => (
@@ -1081,24 +1088,28 @@ const weekLabel = (ts) => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {menu.filter((m) => m.cat === c.id).map((item) => {
                     const available = inventory[item.id]?.available !== false;
+                    const isDraft = inventory[item.id]?.isDraft === true || item.isDraft === true;
                     const currentPrice = inventory[item.id]?.price ?? item.price;
                     const priceD = priceDraft[item.id];
                     const stockGroupId = inventory[item.id]?.stockGroupId || item.id;
                     const stockD = stockDraft[stockGroupId];
                     return (
-                      <div key={item.id} className="border border-green-200 bg-white rounded-lg px-3.5 py-2.5 shadow-sm">
+                      <div key={item.id} data-testid={`inventory-${item.id}`} className="border border-green-200 bg-white rounded-lg px-3.5 py-2.5 shadow-sm">
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div>
-                            <div className="text-sm text-green-950">{item.name}</div>
+                            <h3 className="text-sm text-green-950">{item.name}</h3>
                             <div className="text-xs text-green-800/50">{item.unit}</div>
+                            {isDraft && <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Draft</span>}
                           </div>
-                          {item.cat !== "mains" && <button
+                          {(item.cat !== "mains" || isDraft) && <button
                             onClick={() => toggleAvailability(item.id)}
+                            disabled={isDraft && (!(Number(currentPrice) > 0) || available)}
+                            aria-label={isDraft ? "Enable item" : undefined}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
                               available ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
-                            }`}
+                            } disabled:cursor-not-allowed disabled:opacity-40`}
                           >
-                            {available ? "Production available" : "Production paused"}
+                            {isDraft ? "Enable item" : available ? "Production available" : "Production paused"}
                           </button>}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -1117,6 +1128,7 @@ const weekLabel = (ts) => {
                             <button
                               onClick={() => savePrice(item.id)}
                               disabled={priceD === undefined || priceD === ""}
+                              aria-label="Save price"
                               className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold bg-green-100 text-green-800 hover:bg-green-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               title="Save price"
                             >

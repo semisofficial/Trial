@@ -80,6 +80,13 @@ const CHATTIPATHIRI_WEIGHTS = [
   { id: "mc-chattipathiri-2kg", label: "2 kg" },
 ];
 
+function chattipathiriDisplayName(name, weightLabel) {
+  if (!name || !weightLabel) return name;
+  const escaped = weightLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const withoutTrailingWeight = name.replace(new RegExp(`(?:\\s*[-–—]\\s*|\\s+)${escaped}\\s*$`, "i"), "").trim();
+  return withoutTrailingWeight || name;
+}
+
 
 /* ---------------------------------------------------------
    Customer: Menu + Cart + Checkout
@@ -465,7 +472,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                 <div className="p-4 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                   <div className="text-lg text-[#3F3B24]" style={{ fontFamily: "var(--font-serif)", fontWeight: 600 }}>
-                      {isChattipathiri ? "Chattipathiri" : item.name}
+                      {isChattipathiri ? chattipathiriDisplayName(item.name, selectedChattipathiri.label) : item.name}
                       {!isChattipathiri && <span className="inline-block max-w-full text-stone-500 text-xs ml-1.5">
                         {item.unit?.replace(/(\d+(?:\.\d+)?)\s+(kg|gm?|pieces?|pack|combo)\b/gi, "$1\u00a0$2")}
                       </span>}

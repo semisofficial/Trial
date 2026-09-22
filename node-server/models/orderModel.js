@@ -7,7 +7,7 @@ const ORDER_SELECT = `
     o.delivery_date, o.delivery_slot, o.synced_at, o.invoice_share_token,
     c.name AS customer_name, c.phone AS customer_phone, c.address AS customer_address,
     c.latitude, c.longitude,
-    COALESCE(json_agg(json_build_object('id', oi.menu_item_id, 'name', mi.name,
+    COALESCE(json_agg(json_build_object('id', oi.menu_item_id, 'name', oi.item_name_snapshot,
       'qty', oi.quantity, 'price', oi.unit_price))
       FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
   FROM orders o
@@ -155,7 +155,7 @@ async function priceItems(client, requestedItems) {
     `SELECT mi.id, mi.name, mi.category_id, mi.min_qty, mi.step_qty,
             i.selling_price
        FROM menu_items mi JOIN inventory i ON i.menu_item_id = mi.id
-      WHERE mi.id = ANY($1::text[]) AND NOT mi.retired FOR SHARE OF mi, i`,
+      WHERE mi.id = ANY($1::text[]) AND NOT mi.retired AND NOT mi.is_draft FOR SHARE OF mi, i`,
     [requestedItems.map((item) => item.id)]
   );
   const catalog = new Map(result.rows.map((row) => [String(row.id), row]));
@@ -214,9 +214,9 @@ async function insertOrder(client, { customer, items, orderMode, notes, keyHash,
   );
   for (const item of items) {
     await client.query(
-      `INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, subtotal)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, item.id, item.qty, item.price, item.qty * item.price]
+      `INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, subtotal, item_name_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, item.id, item.qty, item.price, item.qty * item.price, item.name]
     );
   }
   return { ...publicOrderRow(orderResult.rows[0]), customer, items, replayed: false };
@@ -250,7 +250,7 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
         if (existing.checkout_request_hash !== requestHash) {
           throw orderError("This checkout identifier was already used for different details. Please start a new checkout.", "IDEMPOTENCY_CONFLICT");
         }
-        const savedItems = (await client.query(`SELECT oi.menu_item_id AS id, mi.name,
+        const savedItems = (await client.query(`SELECT oi.menu_item_id AS id, oi.item_name_snapshot AS name,
           mi.category_id AS "categoryId", oi.quantity AS qty, oi.unit_price AS price
           FROM order_items oi JOIN menu_items mi ON mi.id=oi.menu_item_id
           WHERE oi.order_id=$1 ORDER BY oi.id`, [existing.id])).rows

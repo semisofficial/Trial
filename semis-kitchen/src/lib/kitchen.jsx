@@ -109,11 +109,8 @@ function formatItemName(name) {
   return `${prefix} ${base}`.trim();
 }
 
-export async function loadMenu() {
-  const res = await fetch(`${API}/menu`);
-  const json = await parseApiResponse(res, "Unable to load the menu");
-
-  const menu = json.data.map((item) => ({
+function mapMenuItems(data) {
+  return data.map((item) => ({
     id: item.id,
     cat: item.cat,
     isCombo: item.isCombo === true,
@@ -126,8 +123,15 @@ export async function loadMenu() {
     stock: Number(item.stock),
     available: item.available !== false,
     seasonal: item.seasonal,
+    isDraft: item.isDraft === true,
     img: imageForItem(item),
   }));
+}
+
+export async function loadMenu() {
+  const res = await fetch(`${API}/menu`);
+  const json = await parseApiResponse(res, "Unable to load the menu");
+  const menu = mapMenuItems(json.data);
 
   // Hybrid: the live (authoritative) catalog is cached locally so the menu can
   // paint instantly on later visits even before the backend responds. New live
@@ -137,6 +141,12 @@ export async function loadMenu() {
   writeMenuCache(menu);
 
   return menu;
+}
+
+export async function loadAdminMenu() {
+  const res = await adminRequest("/menu/admin", { cache: "no-store" });
+  const json = await parseApiResponse(res, "Unable to load the admin menu");
+  return mapMenuItems(json.data);
 }
 
 /* Map image filenames (from src/assets/images/) to their built URLs.
@@ -165,7 +175,7 @@ const ITEM_PHOTOS = {
   "combo-batura": "batura butter chicken.jpeg",
 };
 
-function imageForItem(item) {
+export function imageForItem(item) {
   return item.img || ITEM_PHOTOS[item.id] || "";
 }
 
@@ -258,6 +268,10 @@ const imgCache = new Map();
 export function resolveImg(img) {
   if (!img) return undefined;
   if (imgCache.has(img)) return imgCache.get(img);
+  if (/^\/api\/items\/[A-Za-z0-9_-]+\/photo\?v=[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(img)) {
+    imgCache.set(img, img);
+    return img;
+  }
   const clean = img.replace(/^images\//, "");
   const direct = MENU_IMAGES[`/src/assets/images/${clean}`];
   if (direct) {
@@ -312,7 +326,7 @@ function readMenuCacheSync() {
 }
 
 function writeMenuCache(menu) {
-  if (!Array.isArray(menu) || menu.length === 0) return;
+  if (!Array.isArray(menu)) return;
   try {
     localStorage.setItem(MENU_CACHE_KEY, JSON.stringify(menu));
   } catch {
@@ -329,22 +343,70 @@ export function loadMenuStored() {
   return source.map((item) => ({ ...item, name: formatItemName(item.name), img: imageForItem(item) }));
 }
 
-export async function loadInventory() {
-  const res = await fetch(`${API}/inventory`);
-  const json = await parseApiResponse(res, "Unable to load stock information");
-
+function mapInventory(data) {
   const inv = {};
-
-  json.data.forEach((item) => {
+  data.forEach((item) => {
     inv[item.menu_item_id] = {
       stock: item.stock == null ? null : Math.floor(Number(item.stock)),
       stockGroupId: item.stock_group_id || item.menu_item_id,
       available: item.available,
       price: Number(item.selling_price),
+      isDraft: item.isDraft === true || item.is_draft === true,
     };
   });
-
   return inv;
+}
+
+export async function loadInventory() {
+  const res = await fetch(`${API}/inventory`);
+  const json = await parseApiResponse(res, "Unable to load stock information");
+  return mapInventory(json.data);
+}
+
+export async function loadAdminInventory() {
+  const res = await adminRequest("/inventory/admin", { cache: "no-store" });
+  const json = await parseApiResponse(res, "Unable to load admin stock information");
+  return mapInventory(json.data);
+}
+
+export async function loadItems() {
+  const res = await adminRequest("/items", { cache: "no-store" });
+  return (await parseApiResponse(res, "Unable to load items")).data;
+}
+
+export async function createItem(fields) {
+  const res = await adminRequest("/items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  return (await parseApiResponse(res, "Unable to create item")).data;
+}
+
+export async function updateItem(id, fields, revision) {
+  const res = await adminRequest(`/items/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": `"${revision}"` },
+    body: JSON.stringify(fields),
+  });
+  return (await parseApiResponse(res, "Unable to update item")).data;
+}
+
+export async function retireItem(id, revision) {
+  const res = await adminRequest(`/items/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "If-Match": `"${revision}"` },
+  });
+  return parseApiResponse(res, "Unable to retire item");
+}
+
+export async function uploadItemPhoto(id, file, revision) {
+  const res = await adminRequest(`/items/${encodeURIComponent(id)}/photo`, {
+    method: "PUT",
+    headers: { "Content-Type": file.type, "If-Match": `"${revision}"` },
+    body: file,
+  });
+  return (await parseApiResponse(res, "Unable to save item photo")).data;
 }
 
 /* Field-level inventory update — sends only the changed field(s) so concurrent

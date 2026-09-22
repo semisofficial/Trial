@@ -22,3 +22,9 @@ exports.getMenu = async (req, res) => {
     });
   }
 };
+
+exports.getAdminMenu = async (req, res, next) => {
+  res.set("Cache-Control", "private, no-store");
+  try { res.json({ success: true, data: await menuModel.getMenu(true) }); }
+  catch (error) { next(error); }
+};

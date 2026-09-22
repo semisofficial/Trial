@@ -23,6 +23,8 @@ function testDatabase() {
       await database.exec(fs.readFileSync(path.join(__dirname, '../menu_offers.sql'), 'utf8'));
       const security = path.join(__dirname, '../security_hardening.sql');
       if (fs.existsSync(security)) await database.exec(fs.readFileSync(security, 'utf8'));
+      const items = path.join(__dirname, '../items_management.sql');
+      if (fs.existsSync(items)) await database.exec(fs.readFileSync(items, 'utf8'));
     },
     close: () => database.close(),
   };

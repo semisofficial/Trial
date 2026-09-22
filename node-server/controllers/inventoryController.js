@@ -50,6 +50,7 @@ exports.updateInventory = async (req, res) => {
       data,
     });
   } catch (err) {
+    if (err.publicMessage) return res.status(err.status || 400).json({ success: false, message: err.publicMessage });
     console.error(err);
 
     res.status(500).json({
@@ -57,4 +58,10 @@ exports.updateInventory = async (req, res) => {
       message: "Unable to update inventory",
     });
   }
+};
+
+exports.getAdminInventory = async (req, res, next) => {
+  res.set("Cache-Control", "private, no-store");
+  try { res.json({ success: true, data: await inventory.getInventory(true) }); }
+  catch (error) { next(error); }
 };

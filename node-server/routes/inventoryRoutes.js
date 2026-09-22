@@ -5,6 +5,7 @@ const controller = require("../controllers/inventoryController");
 const { requireAdmin } = require("../middleware/adminAuth");
 
 router.get("/", controller.getInventory);
+router.get("/admin", requireAdmin, controller.getAdminInventory);
 
 router.put("/:id", requireAdmin, controller.updateInventory);
 

@@ -23,7 +23,7 @@ const SINGLE_ORDER_QUERY = `
     c.phone,
 
     oi.id AS order_item_id,
-    mi.name AS item_name,
+    oi.item_name_snapshot AS item_name,
     oi.quantity,
     oi.unit_price,
     oi.subtotal,
@@ -59,7 +59,7 @@ const ACCEPTED_ORDERS_QUERY = `
     c.phone,
 
     oi.id AS order_item_id,
-    mi.name AS item_name,
+    oi.item_name_snapshot AS item_name,
     oi.quantity,
     oi.unit_price,
     oi.subtotal,
@@ -99,7 +99,7 @@ const COMPLETED_ORDERS_QUERY = `
     c.phone,
 
     oi.id AS order_item_id,
-    mi.name AS item_name,
+    oi.item_name_snapshot AS item_name,
     oi.quantity,
     oi.unit_price,
     oi.subtotal,
