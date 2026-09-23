@@ -7,7 +7,7 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     routes:
-      # Stable WhatsApp URL; redirect before any stale static asset can shadow it.
+      # Legacy QR links use the same repository-owned image as Sales and new shares.
       - type: redirect
         source: /upi-qr.jpeg
         destination: /api/payment-qr/image
@@ -29,7 +29,7 @@ services:
     headers:
       - path: /upi-qr.jpeg
         name: Cache-Control
-        value: public, max-age=0, must-revalidate
+        value: no-store
       - path: /upi-qr.jpeg
         name: X-Robots-Tag
         value: noindex, nofollow, noarchive

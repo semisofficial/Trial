@@ -27,16 +27,15 @@ test('payment QR upload and management endpoints are removed even for signed-in 
     }
   }
 });
-test('public QR is repository-owned, ignores historical database overrides, and works without database', async () => {
+test('fixed QR image is served without using historical database overrides', async () => {
   await fixture.database.exec(fs.readFileSync(path.join(__dirname, '../payment_qr.sql'), 'utf8'));
   await fixture.query("UPDATE payment_qr SET image=$1, version=gen_random_uuid()::text, updated_at=now() WHERE id=1", [Buffer.from('untrusted old override')]);
   fixture.setUnavailable(true);
   try {
     const image = await fetch(base + '/payment-qr/image');
     assert.equal(image.status, 200);
-    assert.equal(image.headers.get('content-type'), 'image/png');
-    assert.deepEqual(Buffer.from(await image.arrayBuffer()), fs.readFileSync(path.join(__dirname, '../assets/upi-qr.png')));
-    const cached = await fetch(base + '/payment-qr/image', { headers: { 'If-None-Match': image.headers.get('etag'), 'Cache-Control': 'max-age=0' } });
-    assert.equal(cached.status, 304);
+    assert.match(image.headers.get('content-type'), /image\/jpeg/);
+    assert.equal(image.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), fs.readFileSync(path.join(__dirname, '../assets/payment-qr-2026-09-23.jpeg')));
   } finally { fixture.setUnavailable(false); }
 });

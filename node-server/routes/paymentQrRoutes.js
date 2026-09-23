@@ -2,12 +2,11 @@ const express = require('express');
 const path = require('node:path');
 const router = express.Router();
 
-// Payment details are repository-owned. No session, upload endpoint or database
-// override can replace this image; updates require a reviewed code deployment.
+// Repository-owned image only. No staff write route or database override.
 router.get('/image', (req, res) => {
   res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
-  res.set('Cache-Control', 'public, max-age=0, must-revalidate');
-  res.sendFile(path.join(__dirname, '../assets/upi-qr.png'));
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '../assets/payment-qr-2026-09-23.jpeg'), { cacheControl: false });
 });
 
 module.exports = router;

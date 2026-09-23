@@ -496,24 +496,24 @@ export function downloadInvoice(orderId) {
 
 /* Open a customer WhatsApp chat with the branded public invoice link and the
    manual thank-you message. This does not call the Meta/WhatsApp API. */
+export const PAYMENT_QR_PATH = '/api/payment-qr/image?v=2026-09-23';
+
 export function shareInvoiceOnWhatsApp(orderId, customerPhone, invoiceShareToken) {
   let digits = String(customerPhone || "").replace(/\D/g, "");
   if (digits.length === 10) digits = `91${digits}`;
 
   if (!invoiceShareToken) throw new Error("This invoice does not have a sharing token");
   const invoiceUrl = `https://semiskitchen.in/invoice/${encodeURIComponent(orderId)}?token=${encodeURIComponent(invoiceShareToken)}`;
-  const qrUrl = "https://semiskitchen.in/api/payment-qr/image";
   const message = `Thank you for choosing Semi’s Kitchen! ❤️
 We truly appreciate your order and the trust you’ve placed in us. Every dish is prepared with care, love, and attention to detail.
 We hope you enjoy every bite!
 Thank you for supporting Semi’s Kitchen. 🍽️✨
-UPI payment QR: ${qrUrl}
+UPI payment QR: https://semiskitchen.in${PAYMENT_QR_PATH}
 Your invoice: ${invoiceUrl}`;
 
   // Open the intended customer's WhatsApp chat directly. Web share sheets
-  // cannot target a particular recipient, so the QR remains a public link in
-  // the prepared message instead of being attached through navigator.share.
-  // QR is the first URL; WhatsApp decides whether to display a link preview.
+  // cannot target a particular recipient. The QR link uses the same fixed
+  // image endpoint as the read-only Sales preview.
   const recipient = digits ? `/${digits}` : "";
   window.open(`https://wa.me${recipient}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
 }

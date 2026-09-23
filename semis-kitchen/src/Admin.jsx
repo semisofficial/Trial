@@ -19,6 +19,7 @@ Save,
 } from "lucide-react";
 import {
   FONTS,
+  PAYMENT_QR_PATH,
   CATS,
   STATUS,
   Logo,
@@ -64,6 +65,7 @@ export default function Admin() {
   const [primaryNavOpen, setPrimaryNavOpen] = useState(false);
   const [invoiceGroup, setInvoiceGroup] = useState("recent"); // recent | day | week
   const [salesGroup, setSalesGroup] = useState("day"); // day | week
+  const [qrPreviewFailed, setQrPreviewFailed] = useState(false);
   // Flexible date-range filtering (all / day / week / month) applied to invoices & sales
   const [invRange, setInvRange] = useState("all");
   const [invRefDate, setInvRefDate] = useState(() => indiaCalendarDateKey());
@@ -1250,6 +1252,16 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
                   </div>
                 </div>
               </div>
+
+              <section className="bg-white border border-green-200 rounded-xl p-4 mb-6 shadow-sm" aria-label="Payment QR preview">
+                <h3 className="text-green-950 font-semibold">Current payment QR — read-only</h3>
+                <p className="text-green-800 text-sm mt-1 mb-3">This is the QR linked in customer WhatsApp messages. Staff cannot change it.</p>
+                {qrPreviewFailed ? (
+                  <p role="alert" className="text-red-700 text-sm">QR preview could not load. Refresh the page to try again; verify payment details before sharing.</p>
+                ) : (
+                  <img src={PAYMENT_QR_PATH} alt="Current payment QR" className="w-full max-w-64 h-auto rounded-lg" onError={() => setQrPreviewFailed(true)} />
+                )}
+              </section>
 
 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
                     {statCard("Orders", sold.length)}

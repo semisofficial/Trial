@@ -31,10 +31,11 @@ try {
   });
   await vite.listen();
   const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
-  const oldImage = await readFile(new URL('../../node-server/assets/upi-qr.png', import.meta.url));
   const fallback = await fetch(`${base}/upi-qr.jpeg`, { signal: AbortSignal.timeout(10000) });
-  assert.equal(fallback.headers.get('content-type'), 'image/png');
-  assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), oldImage);
+  assert.equal(fallback.status, 200);
+  assert.match(fallback.headers.get('content-type'), /image\/jpeg/);
+  const expected = await readFile(new URL('../../node-server/assets/payment-qr-2026-09-23.jpeg', import.meta.url));
+  assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), expected);
   const signedIn = await fetch(`${base}/api/admin/login`, { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: process.env.ADMIN_PASSWORD }) });
   assert.equal(signedIn.status, 200);
@@ -44,9 +45,12 @@ try {
   assert.equal(saved.status, 404);
   const live = await fetch(`${base}/upi-qr.jpeg?v=old-cached-version`);
   assert.equal(live.status, 200);
-  assert.equal(live.headers.get('content-type'), 'image/png');
-  assert.deepEqual(Buffer.from(await live.arrayBuffer()), oldImage);
-  console.log('PASS: stable public QR URL serves only the bundled image through real Vite/API routing; uploads are rejected.');
+  assert.deepEqual(Buffer.from(await live.arrayBuffer()), expected);
+  assert.equal(live.headers.get('cache-control'), 'no-store');
+  const current = await fetch(`${base}/api/payment-qr/image?v=2026-09-23`);
+  assert.equal(current.status, 200);
+  assert.deepEqual(Buffer.from(await current.arrayBuffer()), expected);
+  console.log('PASS: legacy and current QR URLs serve the exact fixed image; uploads are rejected.');
 } finally {
   await vite?.close();
   if (api) { api.closeAllConnections(); await new Promise(resolve => api.close(resolve)); }

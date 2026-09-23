@@ -49,11 +49,10 @@ try {
       'We truly appreciate your order and the trust you’ve placed in us. Every dish is prepared with care, love, and attention to detail.',
       'We hope you enjoy every bite!',
       'Thank you for supporting Semi’s Kitchen. 🍽️✨',
-      'UPI payment QR: https://semiskitchen.in/api/payment-qr/image',
+      'UPI payment QR: https://semiskitchen.in/api/payment-qr/image?v=2026-09-23',
       'Your invoice: https://semiskitchen.in/invoice/TEST%2FORDER?token=test%2Btoken',
     ].join('\n'));
-    assert.equal(text.match(/\/api\/payment-qr\/image/g).length, 1);
-    assert.doesNotMatch(text, /upi-qr\.jpeg/);
+    assert.equal((text.match(/UPI payment QR:/g) || []).length, 1);
   }
   const declined = new URL(result.opened[2][0]);
   assert.equal(declined.pathname, '/919876543210');
@@ -72,7 +71,7 @@ try {
     const text = link.searchParams.get('text');
     assert.ok(text.startsWith('Thank you for choosing Semi’s Kitchen! ❤️'));
     assert.ok(text.endsWith(`Your invoice: https://semiskitchen.in/invoice/TEST-${status}?token=token-${status}`));
-    assert.ok(text.indexOf('UPI payment QR:') < text.indexOf('Your invoice:'));
+    assert.ok(text.includes('UPI payment QR: https://semiskitchen.in/api/payment-qr/image?v=2026-09-23'));
     await page.setViewportSize({ width: 360, height: 800 });
     const card = page.locator('main .shadow-sm').filter({ hasText: `Customer ${status}` });
     assert.equal(await card.evaluate(el => el.scrollWidth > el.clientWidth + 1), false, 'Order actions must wrap inside their card');
@@ -83,5 +82,5 @@ try {
     await page.getByRole('tab', { name: `${label} (1)`, exact: true }).click();
     assert.equal(await page.getByRole('button', { name: 'Share on WhatsApp', exact: true }).count(), 0);
   }
-  console.log('PASS: direct customer chat, requested message layout, QR before invoice, token guard and decline message.');
+  console.log('PASS: direct customer chat, current QR and invoice links, token guard and decline message.');
 } finally { await browser.close(); }
