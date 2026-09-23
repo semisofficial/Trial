@@ -502,7 +502,7 @@ export function shareInvoiceOnWhatsApp(orderId, customerPhone, invoiceShareToken
 
   if (!invoiceShareToken) throw new Error("This invoice does not have a sharing token");
   const invoiceUrl = `https://semiskitchen.in/invoice/${encodeURIComponent(orderId)}?token=${encodeURIComponent(invoiceShareToken)}`;
-  const qrUrl = "https://semiskitchen.in/upi-qr.jpeg";
+  const qrUrl = "https://semiskitchen.in/api/payment-qr/image";
   const message = `Thank you for choosing Semi’s Kitchen! ❤️
 We truly appreciate your order and the trust you’ve placed in us. Every dish is prepared with care, love, and attention to detail.
 We hope you enjoy every bite!

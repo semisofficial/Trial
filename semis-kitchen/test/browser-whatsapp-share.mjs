@@ -49,10 +49,11 @@ try {
       'We truly appreciate your order and the trust you’ve placed in us. Every dish is prepared with care, love, and attention to detail.',
       'We hope you enjoy every bite!',
       'Thank you for supporting Semi’s Kitchen. 🍽️✨',
-      'UPI payment QR: https://semiskitchen.in/upi-qr.jpeg',
+      'UPI payment QR: https://semiskitchen.in/api/payment-qr/image',
       'Your invoice: https://semiskitchen.in/invoice/TEST%2FORDER?token=test%2Btoken',
     ].join('\n'));
-    assert.equal(text.match(/upi-qr\.jpeg/g).length, 1);
+    assert.equal(text.match(/\/api\/payment-qr\/image/g).length, 1);
+    assert.doesNotMatch(text, /upi-qr\.jpeg/);
   }
   const declined = new URL(result.opened[2][0]);
   assert.equal(declined.pathname, '/919876543210');

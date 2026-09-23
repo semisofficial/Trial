@@ -10,7 +10,7 @@ services:
       # Stable WhatsApp URL; redirect before any stale static asset can shadow it.
       - type: redirect
         source: /upi-qr.jpeg
-        destination: https://semiskitchenbe.onrender.com/api/payment-qr/image
+        destination: /api/payment-qr/image
       # Keep API calls first-party so the HttpOnly Admin session cookie works.
       - type: rewrite
         source: /api/*
