@@ -25,6 +25,7 @@ function testDatabase() {
       if (fs.existsSync(security)) await database.exec(fs.readFileSync(security, 'utf8'));
       const items = path.join(__dirname, '../items_management.sql');
       if (fs.existsSync(items)) await database.exec(fs.readFileSync(items, 'utf8'));
+      await database.exec(fs.readFileSync(path.join(__dirname, '../order_stock.sql'), 'utf8'));
     },
     close: () => database.close(),
   };

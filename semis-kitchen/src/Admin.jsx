@@ -270,6 +270,7 @@ export default function Admin() {
     try {
       await updateInventoryField(itemId, { stock });
       await refreshInventory();
+      await refreshOrders();
     } catch {
       return;
     }
@@ -726,6 +727,19 @@ export default function Admin() {
                       </div>
                     ))}
                   </div>
+                  {o.status === "pending" && o.stockShortages?.length > 0 && (
+                    <section aria-label="Stock shortages" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                      <h3 className="font-semibold">Production needed</h3>
+                      {o.stockShortages.map(s => (
+                        <div key={s.stockGroupId} className="mt-2 break-words">
+                          <div className="font-medium">{s.name}</div>
+                          <div>Available: {s.available} · Required: {s.required} · Shortage: {s.shortage}</div>
+                        </div>
+                      ))}
+                      <p className="mt-2">Prepare the remaining items or decline the order. Fried/frozen variants share stock.</p>
+                      <p className="mt-1 text-xs">Based on current stock for this order only; other pending orders do not reserve stock. Refresh to check the latest counts.</p>
+                    </section>
+                  )}
                   {o.customer.notes && <div className="text-xs text-green-800/50 italic mt-2 break-all">Note: {o.customer.notes}</div>}
                   <div className="flex flex-wrap gap-3 justify-between items-center mt-3 pt-3 border-t border-green-100">
                     <span className="font-semibold text-amber-600">{rupee(o.total)}</span>

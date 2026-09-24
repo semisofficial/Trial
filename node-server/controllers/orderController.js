@@ -118,6 +118,8 @@ const updateOrderStatus = async (req, res) => {
     res.json({ success: true, data: order });
   } catch (err) {
     console.error("❌ Failed to update order:", err.message);
+    if (err.code === '42P01') return res.status(503).json({ success: false,
+      message: 'Order stock tracking needs database setup. Apply order_stock.sql before accepting orders.' });
     const statusCode = err.code === "INSUFFICIENT_STOCK" ? 409
       : ["INVALID_ORDER", "INVALID_STATUS_TRANSITION"].includes(err.code) ? 400 : 500;
     res.status(statusCode).json({

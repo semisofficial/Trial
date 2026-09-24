@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const db = require("../config/db");
+const orderStock = require('./orderStock');
 
 const ORDER_SELECT = `
   SELECT o.id, o.invoice_id, o.status, o.order_mode, o.notes, o.total,
@@ -285,7 +286,14 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
 }
 
 async function getOrders() {
-  return (await db.query(`${ORDER_SELECT} WHERE o.archived = false GROUP BY o.id, c.id ORDER BY o.created_at DESC`)).rows;
+  const rows = (await db.query(`${ORDER_SELECT} WHERE o.archived = false GROUP BY o.id, c.id ORDER BY o.created_at DESC`)).rows;
+  const shortages = await orderStock.pendingShortages(db, rows.filter(o => o.status === 'pending').map(o => o.id));
+  const byOrder = new Map();
+  for (const row of shortages) {
+    if (!byOrder.has(row.order_id)) byOrder.set(row.order_id, []);
+    byOrder.get(row.order_id).push(row);
+  }
+  return rows.map(o => ({ ...o, stock_shortages: byOrder.get(o.id) || [] }));
 }
 
 async function getArchivedOrders() {
@@ -298,10 +306,7 @@ async function archiveOrders(ids) {
 }
 
 async function restoreOrderStock(client, id) {
-  await client.query(
-    `UPDATE inventory i SET stock = i.stock + oi.quantity
-       FROM order_items oi WHERE oi.order_id = $1 AND i.menu_item_id = oi.menu_item_id`, [id]
-  );
+  await orderStock.restore(client, id);
 }
 
 async function updateOrderStatus(id, status) {
@@ -323,7 +328,9 @@ async function updateOrderStatus(id, status) {
     }
     let reserved = previous.stock_reserved;
     if (status !== previous.status) {
-      if (reserved && status === "declined") {
+      if (status === "accepted" && !reserved) {
+        reserved = await orderStock.deduct(client, id);
+      } else if (reserved && status === "declined") {
         await restoreOrderStock(client, id);
         reserved = false;
       } else if (reserved && status === "completed") {

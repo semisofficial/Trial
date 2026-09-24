@@ -414,6 +414,10 @@ function mapOrder(o) {
     paymentStatus: o.payment_status || "unpaid",
     paymentMethod: o.payment_method || "cod",
     syncedAt: o.synced_at,
+    stockShortages: (o.stock_shortages || []).map(s => ({
+      stockGroupId: s.stock_group_id, name: formatItemName(s.name),
+      required: Number(s.required), available: Number(s.available), shortage: Number(s.shortage),
+    })),
     total: Number(o.total),
     createdAt: new Date(o.created_at).getTime(),
     customer: {
