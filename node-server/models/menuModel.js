@@ -36,7 +36,7 @@ async function queryMenu(includeDrafts) {
     LEFT JOIN item_photos p ON p.menu_item_id = m.id
     LEFT JOIN inventory si ON si.menu_item_id = COALESCE(m.stock_group_id, m.id)
     WHERE NOT m.retired AND ($1::boolean OR (NOT m.is_draft AND COALESCE(i.available, true)))
-    ORDER BY c.id, m.is_combo DESC, m.name;
+    ORDER BY c.id, m.is_combo DESC, m.display_order, m.name, m.id;
   `, [includeDrafts]);
 }
 

@@ -241,7 +241,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     const hasLocation = form.location?.lat != null && form.location?.lng != null;
     const requiredErrors = {
       name: !form.name.trim(),
-      phone: !form.phone.trim(),
+      phone: !/^\d{10}$/.test(form.phone),
       location: form.mode === "Delivery" && !form.address.trim() && !hasLocation,
       deliveryDate: !form.deliveryDate || (!isPendingRetry && form.deliveryDate < minimumDeliveryDate),
       deliverySlot: !form.deliverySlot || (!isPendingRetry && !selectedSlotIsAvailable),
@@ -556,7 +556,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
           <div className="relative w-full sm:w-[420px] bg-green-950 border-l border-green-900 h-full flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-green-900">
               <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Your order</h2>
-              <button onClick={() => setCartOpen(false)}><X className="w-5 h-5 text-stone-400" /></button>
+              <button onClick={() => setCartOpen(false)}><Plus className="w-5 h-5 text-stone-400" /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
               {cartLines.length === 0 && <p className="text-stone-500 text-sm">Your cart is empty.</p>}
@@ -662,12 +662,20 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
               {checkoutErrors.name && <p className="-mt-2 text-xs text-red-300">Please enter your full name.</p>}
               <input
                 placeholder="Phone number"
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                pattern="[0-9]{10}"
                 value={form.phone}
                 aria-invalid={checkoutErrors.phone || undefined}
-                onChange={(e) => { setForm((f) => ({ ...f, phone: e.target.value })); setCheckoutErrors((current) => ({ ...current, phone: false })); }}
+                onChange={(e) => {
+                  const phone = e.target.value.replace(/\D/g, "").slice(0, 10);
+                  setForm((f) => ({ ...f, phone }));
+                  setCheckoutErrors((current) => ({ ...current, phone: false }));
+                }}
                 className={`w-full bg-green-900/60 border rounded-lg px-3.5 py-2.5 text-sm text-stone-100 placeholder-stone-500 focus:outline-none focus:ring-2 ${checkoutErrors.phone ? "border-red-400 ring-2 ring-red-400/40" : "border-green-800 focus:ring-amber-400"}`}
               />
-              {checkoutErrors.phone && <p className="-mt-2 text-xs text-red-300">Please enter your phone number.</p>}
+              {checkoutErrors.phone && <p className="-mt-2 text-xs text-red-300">Please enter a 10-digit phone number.</p>}
               {form.mode === "Delivery" && (
                 <div className={checkoutErrors.location ? "rounded-xl ring-2 ring-red-400" : ""}>
                 <Suspense

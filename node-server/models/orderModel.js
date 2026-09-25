@@ -57,11 +57,11 @@ function normalizeRequestedItems(items) {
 function normalizeCustomer(customer) {
   if (!customer || typeof customer !== "object") throw orderError("Customer details are required");
   const name = String(customer.name || "").trim();
-  const phone = String(customer.phone || "").replace(/[^0-9+]/g, "");
+  const phone = String(customer.phone || "").trim();
   const address = String(customer.address || "").trim();
   const notes = String(customer.notes || "").trim();
   if (name.length < 2 || name.length > 100) throw orderError("Please enter a valid customer name");
-  if (!/^\+?\d{7,15}$/.test(phone)) throw orderError("Please enter a valid phone number");
+  if (!/^\d{10}$/.test(phone)) throw orderError("Please enter a valid 10-digit phone number");
   if (address.length > 500 || notes.length > 1000) throw orderError("Customer details are too long");
   const location = customer.location?.lat != null && customer.location?.lng != null
     ? { lat: Number(customer.location.lat), lng: Number(customer.location.lng) }

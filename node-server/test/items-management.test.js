@@ -24,7 +24,7 @@ async function call(url, method = 'GET', body, revision, authenticated = true) {
 const data = async response => { assert.ok(response.ok, await response.clone().text()); return (await response.json()).data; };
 function orderInput(id, qty = 10) {
   const day = new Date(); day.setUTCDate(day.getUTCDate() + 2);
-  return { customer: { name: 'Items test customer', phone: '919999999999', address: 'Test only',
+  return { customer: { name: 'Items test customer', phone: '9999999999', address: 'Test only',
     deliveryDate: day.toISOString().slice(0, 10), deliverySlot: '12-13' }, orderMode: 'Pickup',
     items: [{ id, qty }], idempotencyKey: randomUUID() };
 }

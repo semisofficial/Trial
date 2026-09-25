@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CATS, createItem, imageForItem, loadItems, resolveImg, retireItem, updateItem, uploadItemPhoto } from "../lib/kitchen.jsx";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CATS, createItem, imageForItem, loadItems, resolveImg, retireItem, updateItem, uploadItemPhoto, reorderItems } from "../lib/kitchen.jsx";
+import { itemGroups, moveMenuGroup, sectionOf } from '../lib/menuOrdering.js';
+import ReorderableItems from './ReorderableItems.jsx';
 
 const EMPTY_FORM = { name: "", cat: "fried", unit: "1 piece", minQty: "1", step: "1", isCombo: false };
 
@@ -37,6 +39,7 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
   const [retiring, setRetiring] = useState(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
+  const savingOrder = useRef(false);
   const currentPhoto = editing ? resolveImg(imageForItem(editing)) : null;
 
   const refresh = useCallback(async () => {
@@ -73,6 +76,30 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
     setEditing(item || { id: null });
     setForm(fieldsFrom(item));
     setMessage("");
+  };
+
+  const moveItem = async (from, target, after) => {
+    if (pending || savingOrder.current || search.trim()) return;
+    const next=moveMenuGroup(items,from,target,after);
+    if(next===items)return;
+    const section=itemGroups(items).find(group=>group.key===from).section;
+    const previous=items;
+    savingOrder.current=true;
+    setPending(true); setMessage('Saving menu order…'); setItems(next);
+    try {
+      setItems(await reorderItems(section,next.filter(item=>sectionOf(item)===section)));
+      setMessage('Menu order saved.');
+      await onChanged?.();
+    } catch(error) {
+      try {setItems(await loadItems());} catch {setItems(previous);}
+      setMessage(error.status===409 ? error.message : 'Could not confirm the saved order. Reload the list before trying again.');
+    } finally {
+      savingOrder.current=false; setPending(false);
+      requestAnimationFrame(()=>{
+        const node=[...document.querySelectorAll('[data-reorder-key]')].find(el=>el.dataset.reorderKey===from);
+        node?.querySelector('button')?.focus({preventScroll:true});
+      });
+    }
   };
 
   const closeEditor = () => {
@@ -195,7 +222,7 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
           <h2 className="text-2xl text-green-950 font-semibold" style={{ fontFamily: "var(--font-serif)" }}>Items</h2>
           <p className="mt-1 text-sm text-green-800/65">Manage names, photos and ordering quantities. Set prices and availability in Inventory.</p>
         </div>
-        <button type="button" onClick={() => openEditor()} className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-green-950 hover:bg-amber-300">
+        <button type="button" disabled={pending} onClick={() => openEditor()} className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-green-950 hover:bg-amber-300">
           Add item
         </button>
       </div>
@@ -203,16 +230,16 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
       {message && !editing && !retiring && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">{message}</div>}
 
       <div className="grid gap-2 sm:grid-cols-[1fr_14rem]">
-        <input aria-label="Search items" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search items" className="rounded-lg border border-green-300 bg-white px-3 py-2 text-sm" />
-        <select aria-label="Filter items by category" value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-lg border border-green-300 bg-white px-3 py-2 text-sm">
+        <input aria-label="Search items" disabled={pending} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search items" className="rounded-lg border border-green-300 bg-white px-3 py-2 text-sm" />
+        <select aria-label="Filter items by category" disabled={pending} value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-lg border border-green-300 bg-white px-3 py-2 text-sm">
           <option value="all">All categories</option>
           {CATS.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
         </select>
       </div>
 
       {loading ? <p className="py-8 text-center text-sm text-green-800/60">Loading items…</p> : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {visible.map((item) => {
+        <ReorderableItems items={visible} disabled={pending || !!search.trim() || !!editing || !!retiring} onMove={moveItem}>
+          {(item) => {
             const image = resolveImg(imageForItem(item));
             const categoryName = CATS.find((cat) => cat.id === item.cat)?.name || item.cat;
             return (
@@ -234,16 +261,16 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
                 </div>
                 {item.isDraft && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Set price and enable this item in Inventory.</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" aria-label={`Edit ${item.name}`} onClick={() => openEditor(item)} className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-semibold text-green-800">Edit</button>
-                  <button type="button" aria-label={`Delete ${item.name}`} onClick={() => setRetiring(item)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600">Delete</button>
+                  <button type="button" disabled={pending} aria-label={`Edit ${item.name}`} onClick={() => openEditor(item)} className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-semibold text-green-800">Edit</button>
+                  <button type="button" disabled={pending} aria-label={`Delete ${item.name}`} onClick={() => setRetiring(item)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600">Delete</button>
                   {item.isDraft && <button type="button" onClick={onGoToInventory} className="rounded-lg bg-green-100 px-3 py-1.5 text-xs font-semibold text-green-800">Go to Inventory</button>}
                 </div>
               </article>
             );
-          })}
-          {visible.length === 0 && <p className="py-8 text-center text-sm text-green-800/60 sm:col-span-2">No items match this search.</p>}
-        </div>
+          }}
+        </ReorderableItems>
       )}
+      {!loading && visible.length===0 && <p className="py-8 text-center text-sm text-green-800/60">No items match this search.</p>}
 
       {editing && (
         <div role="dialog" aria-modal="true" aria-labelledby="item-editor-title" className="fixed inset-0 z-50 flex items-center justify-center bg-green-950/45 p-4">

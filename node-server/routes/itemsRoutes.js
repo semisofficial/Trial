@@ -32,6 +32,22 @@ const mutations = rateLimit({ windowMs: 15 * 60 * 1000, limit: 80,
 router.get('/', async (req, res) => res.json({ success: true, data: await items.list() }));
 router.use(mutations);
 
+router.put('/reorder', async (req,res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).some(key=>!['section','items'].includes(key))
+      || !['fried','frozen','mains','combos'].includes(body.section)
+      || !Array.isArray(body.items) || body.items.length < 1 || body.items.length > 1000
+      || body.items.some(item=>!item || typeof item !== 'object' || Array.isArray(item)
+        || Object.keys(item).some(key=>!['id','revision'].includes(key))
+        || typeof item.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(item.id)
+        || typeof item.revision !== 'string' || !UUID.test(item.revision))
+      || new Set(body.items.map(item=>item.id)).size !== body.items.length) {
+    throw items.problem(400,'Supply each item in one menu section exactly once with its current revision.');
+  }
+  res.json({ success:true, data:await items.reorder(body.section,body.items) });
+});
+
 function metadata(body) {
   const allowed = ['name', 'cat', 'unit', 'minQty', 'step', 'isCombo'];
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !allowed.includes(key))) {
@@ -91,7 +107,7 @@ router.put('/:id/photo', (req, res, next) => {
 router.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   if (error.publicMessage) return res.status(error.status).json({ success: false, message: error.publicMessage });
-  if (['42P01', '42703'].includes(error.code)) return res.status(503).json({ success: false, message: 'Items management needs database setup. Apply items_management.sql.' });
+  if (['42P01', '42703'].includes(error.code)) return res.status(503).json({ success: false, message: 'Items management needs database setup. Apply items_management.sql and item_ordering.sql.' });
   next(error);
 });
 module.exports = router;

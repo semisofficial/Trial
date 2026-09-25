@@ -19,7 +19,7 @@ after(() => fixture.close());
 async function stock() { return Number((await fixture.query("SELECT stock FROM inventory WHERE menu_item_id='stock-fr'")).rows[0].stock); }
 async function create(items = [{ id: 'stock-fr', qty: 15 }]) {
   const date = new Date(); date.setUTCDate(date.getUTCDate() + 3);
-  return orders.createOrder({ customer: { name: `Stock test ${++serial}`, phone: '919876543210', address: 'Test',
+  return orders.createOrder({ customer: { name: `Stock test ${++serial}`, phone: '9876543210', address: 'Test',
     deliveryDate: date.toISOString().slice(0,10), deliverySlot: '12-13' }, items, orderMode: 'Pickup' });
 }
 test('pending shortages combine shared variants without deducting stock; mains excluded', async () => {

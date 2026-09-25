@@ -20,7 +20,7 @@ test('paused items are private, cannot be newly ordered, and return unchanged wh
   assert.equal(Number(hidden.price), 25);
   assert.equal(Number(hidden.stock), 8);
   const date = new Date(); date.setDate(date.getDate() + 2);
-  await assert.rejects(orders.createOrder({ customer: { name: 'Test', phone: '919999999999', address: 'Test', deliveryDate: date.toISOString().slice(0,10), deliverySlot: '12-13' }, items: [{ id: 'pause-test', qty: 1 }], orderMode: 'Pickup' }), /available|paused/);
+  await assert.rejects(orders.createOrder({ customer: { name: 'Test', phone: '9999999999', address: 'Test', deliveryDate: date.toISOString().slice(0,10), deliverySlot: '12-13' }, items: [{ id: 'pause-test', qty: 1 }], orderMode: 'Pickup' }), /available|paused/);
   await inventory.updateInventory('pause-test', { available: true });
   const visible = (await menu.getMenu()).find(i => i.id === 'pause-test');
   assert.equal(visible.name, 'Pause test');

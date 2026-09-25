@@ -17,7 +17,7 @@ let server, base;
 
 function request() {
   const day = new Date(); day.setUTCDate(day.getUTCDate() + 2);
-  return { customer: { name: 'Security test customer', phone: '919999999999', address: 'Test only',
+  return { customer: { name: 'Security test customer', phone: '9999999999', address: 'Test only',
     deliveryDate: day.toISOString().slice(0, 10), deliverySlot: '12-13' },
   orderMode: 'Delivery', items: [{ id: 'fz-irachi-pathiri', qty: 10 }], idempotencyKey: randomUUID() };
 }
@@ -34,6 +34,13 @@ test('duplicate line items cannot exceed the per-item safety ceiling after aggre
   await assert.rejects(orders.createOrder({ ...request(), items: [
     { id: 'fz-irachi-pathiri', qty: 10000 }, { id: 'fz-irachi-pathiri', qty: 10 },
   ] }), error => error.code === 'INVALID_ORDER');
+});
+
+test('checkout requires exactly 10 numeric phone digits', async () => {
+  await assert.rejects(orders.createOrder({ ...request(), customer: { ...request().customer, phone: '919999999999' } }),
+    error => error.code === 'INVALID_ORDER' && /10-digit/.test(error.message));
+  await assert.rejects(orders.createOrder({ ...request(), customer: { ...request().customer, phone: '+9999999999' } }),
+    error => error.code === 'INVALID_ORDER' && /10-digit/.test(error.message));
 });
 
 test('same checkout key replays the existing order and original price without new customer rows', async () => {

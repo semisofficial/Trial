@@ -12,7 +12,7 @@ const orders = require('../models/orderModel');
 let server, base;
 function request() {
   const day = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
-  return { customer: { name: 'Retirement test', phone: '919999999999', address: 'Test only',
+  return { customer: { name: 'Retirement test', phone: '9999999999', address: 'Test only',
     deliveryDate: day, deliverySlot: '12-13' }, orderMode: 'Delivery',
     items: [{ id: 'fz-irachi-pathiri', qty: 10 }], idempotencyKey: randomUUID() };
 }
@@ -77,7 +77,7 @@ test('a saved pre-removal discounted checkout replays without its deleted promot
   const order = await orders.createOrder(input);
   // Independent fixture matching the historical canonical payload format.
   const historicalHash = createHash('sha256').update(JSON.stringify({
-    customer: { name: 'Retirement test', phone: '919999999999', address: 'Test only', notes: '',
+    customer: { name: 'Retirement test', phone: '9999999999', address: 'Test only', notes: '',
       location: null, email: null, paymentMethod: 'cod', deliveryDate: input.customer.deliveryDate, deliverySlot: '12-13' },
     orderMode: 'Delivery', offerSlug: 'TESTDEAL', items: [{ id: 'fz-irachi-pathiri', qty: 10 }],
   })).digest('hex');

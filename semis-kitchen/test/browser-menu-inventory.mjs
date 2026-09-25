@@ -107,7 +107,7 @@ try {
   await page.getByRole("button", { name: "Proceed to checkout" }).click();
   await page.getByRole("button", { name: "Pickup", exact: true }).click();
   await page.getByPlaceholder("Full name").fill("Test Customer");
-  await page.getByPlaceholder("Phone number").fill("919876543210");
+  await page.getByPlaceholder("Phone number").fill("9876543210");
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   await page.locator('input[type="date"]').fill(tomorrow);
   await page.locator("select").selectOption("12-13");

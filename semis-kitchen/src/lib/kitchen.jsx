@@ -307,6 +307,14 @@ export async function loadItems() {
   return (await parseApiResponse(res, "Unable to load items")).data;
 }
 
+export async function reorderItems(section, items) {
+  const res = await adminRequest('/items/reorder', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({section,items:items.map(({id,revision})=>({id,revision}))}),
+  });
+  return (await parseApiResponse(res,'Unable to save menu order')).data;
+}
+
 export async function createItem(fields) {
   const res = await adminRequest("/items", {
     method: "POST",

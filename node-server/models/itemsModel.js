@@ -10,15 +10,20 @@ const JOIN = 'FROM menu_items m LEFT JOIN item_photos p ON p.menu_item_id=m.id';
 const shape = row => row && ({ ...row, minQty: Number(row.minQty), step: Number(row.step) });
 function problem(status, message) { return Object.assign(new Error(message), { status, publicMessage: message }); }
 
-async function list() {
-  return (await db.query(`SELECT ${FIELDS} ${JOIN} WHERE NOT m.retired ORDER BY m.category_id, m.name, m.id`)).rows.map(shape);
+async function list(client = db) {
+  return (await client.query(`SELECT ${FIELDS} ${JOIN} WHERE NOT m.retired ORDER BY m.category_id, m.is_combo DESC, m.display_order, m.name, m.id`)).rows.map(shape);
 }
 async function get(client, id) {
   return shape((await client.query(`SELECT ${FIELDS} ${JOIN} WHERE m.id=$1 AND NOT m.retired`, [id])).rows[0]);
 }
 async function transaction(fn) {
   const client = await db.connect();
-  try { await client.query('BEGIN'); const result = await fn(client); await client.query('COMMIT'); return result; }
+  try {
+    await client.query('BEGIN');
+    // Serialize catalog membership edits with reorder validation (including inserts).
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('semis-items-catalog',0))");
+    const result = await fn(client); await client.query('COMMIT'); return result;
+  }
   catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }
@@ -33,8 +38,9 @@ async function create(input) {
   return transaction(async client => {
     const id = `item-${randomUUID()}`;
     await client.query(`INSERT INTO menu_items(id, category_id, name, unit, min_qty, step_qty,
-      is_combo, is_draft, default_price, seasonal, image, stock_group_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,true,0,false,'',$1)`,
+      is_combo, is_draft, default_price, seasonal, image, stock_group_id, display_order)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,true,0,false,'',$1,
+        (SELECT COALESCE(MAX(display_order),0)+1 FROM menu_items WHERE category_id=$2 AND is_combo=$7))`,
     [id, input.cat, input.name, input.unit, input.minQty, input.step, input.isCombo]);
     await client.query('INSERT INTO inventory(menu_item_id,selling_price,stock,available) VALUES ($1,0,0,false)', [id]);
     return get(client, id);
@@ -51,7 +57,10 @@ async function update(id, input, revision) {
       }
     }
     await client.query(`UPDATE menu_items SET name=$2, category_id=$3, unit=$4, min_qty=$5,
-      step_qty=$6, is_combo=$7, item_revision=gen_random_uuid() WHERE id=$1`,
+      step_qty=$6, display_order=CASE WHEN category_id<>$3 OR is_combo<>$7
+        THEN (SELECT COALESCE(MAX(display_order),0)+1 FROM menu_items WHERE category_id=$3 AND is_combo=$7)
+        ELSE display_order END,
+      is_combo=$7, item_revision=gen_random_uuid() WHERE id=$1`,
     [id, input.name, input.cat, input.unit, input.minQty, input.step, input.isCombo]);
     return get(client, id);
   });
@@ -93,4 +102,26 @@ async function photo(id, revision) {
   if (photoCache.size > 50) photoCache.delete(photoCache.keys().next().value);
   return bytes;
 }
-module.exports = { list, create, update, retire, savePhoto, photoMetadata, photo, problem };
+const CHATTIPATHIRI = new Set(['mc-chattipathiri-1kg','mc-chattipathiri-1-5kg','mc-chattipathiri-2kg']);
+async function reorder(section, entries) {
+  return transaction(async client => {
+    const cat = section === 'combos' ? 'mains' : section;
+    const combo = section === 'combos';
+    const { rows } = await client.query(`SELECT id,item_revision::text AS revision FROM menu_items
+      WHERE NOT retired AND category_id=$1 AND is_combo=$2 ORDER BY id FOR UPDATE`, [cat,combo]);
+    const current = new Map(rows.map(row=>[row.id,row.revision]));
+    if (rows.length !== entries.length || entries.some(row=>current.get(row.id)!==row.revision)) {
+      throw problem(409,'Items changed in another session. Reload the list before reordering.');
+    }
+    const weights = entries.map((row,index)=>CHATTIPATHIRI.has(row.id)?index:-1).filter(i=>i>=0);
+    if (weights.length && weights.at(-1)-weights[0]+1 !== weights.length) {
+      throw problem(400,'Move Chattipathiri weight options together as one card.');
+    }
+    const positions = entries.map((row,index)=>CHATTIPATHIRI.has(row.id)?weights[0]:index);
+    await client.query(`UPDATE menu_items m SET display_order=ordered.position, item_revision=gen_random_uuid()
+      FROM unnest($1::text[],$2::bigint[]) AS ordered(id,position) WHERE m.id=ordered.id`,
+      [entries.map(row=>row.id),positions]);
+    return list(client);
+  });
+}
+module.exports = { list, create, update, retire, savePhoto, photoMetadata, photo, problem, reorder };

@@ -182,6 +182,7 @@ try {
   assert.match(await page.getByRole("dialog").innerText(), /Crisp Samoosa/);
   assert.match(await page.getByRole("dialog").innerText(), /orders.*preserved/i);
   await page.getByRole("button", { name: "Retire item" }).click();
+  await page.getByTestId("item-fr-samoosa").waitFor({state:'detached'});
   assert.equal(await page.getByText("Crisp Samoosa", { exact: true }).count(), 0);
 
   assert.ok(requests.some((entry) => entry.path === "/api/menu/admin"), "Admin must load the private menu endpoint");
