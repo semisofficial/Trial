@@ -11,6 +11,7 @@ router.get("/archived", requireAdmin, controller.getArchivedOrders);
 router.post("/archive", requireAdmin, controller.archiveOrders);
 router.delete("/paid-synced", requireAdmin, controller.deletePaidSyncedOrders); // keep above /:id
 router.put("/:id/status", requireAdmin, controller.updateOrderStatus);
+router.put("/:id/accept-edited", requireAdmin, controller.acceptEditedOrder);
 router.put("/:id/payment", requireAdmin, controller.updatePaymentStatus);
 router.delete("/:id", requireAdmin, controller.deleteOrder);
 

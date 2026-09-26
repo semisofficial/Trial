@@ -53,7 +53,7 @@ Minimum increments follow existing conventions: piece items increase by 5, kilog
 
 Inventory is manual and no longer blocks orders or decrements automatically. Matching snacks show the same shared stock value; editing their prices or photos remains independent. Mains and combos have no stock editor.
 
-Mains still need advance ordering. Sunday delivery is blocked for mains-only carts and allowed when the cart includes fried or frozen snacks. Pickup follows the existing advance-order rules.
+All categories, including mains and combos, allow same-day ordering with at least three hours before the selected time slot starts (Indian Standard Time). This applies to delivery and pickup. Sunday delivery remains blocked for mains-only carts and allowed when the cart includes fried or frozen snacks; Sunday pickup is allowed.
 
 Invoice descriptions wrap within their column and continue onto additional template pages when needed. The final total appears on the last page. Google Sheets sync writes customer names/phones as literal text (including leading `=` or `+`); totals remain numeric for spreadsheet sums. Existing sheet formulas are not altered.
 

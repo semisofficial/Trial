@@ -492,6 +492,16 @@ export async function updateOrderStatusApi(id, status) {
   return json.data;
 }
 
+export async function acceptEditedOrderApi(id, items) {
+  const res = await adminRequest(`/orders/${id}/accept-edited`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  const json = await parseApiResponse(res, "Unable to accept edited order");
+  return json.data;
+}
+
 export async function fetchSalesSummary() {
   const res = await adminRequest("/sales/summary");
   const json = await parseApiResponse(res, "Unable to load sales summary");

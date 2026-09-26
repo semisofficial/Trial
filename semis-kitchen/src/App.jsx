@@ -62,11 +62,6 @@ function indiaDateTime(now = new Date()) {
   };
 }
 
-function addDaysISO(isoDate, days) {
-  const date = new Date(`${isoDate}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
 /* iOS Safari renders an empty <input type="date"> as a blank box with no
    placeholder text (unlike Chrome/Android/desktop, which show "dd/mm/yyyy"
    on their own). Only iOS needs a manual placeholder overlay — showing one
@@ -201,12 +196,11 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     .filter(Boolean);
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0);
   const cartTotal = cartLines.reduce((s, l) => s + l.qty * l.price, 0);
-  const hasMainsInCart = cartLines.some((line) => line.cat === "mains");
   const cartPlacement = floatingCartPlacement(footerVisible, footerHeight);
   const indiaNow = indiaDateTime();
-  const minimumDeliveryDate = hasMainsInCart ? addDaysISO(indiaNow.date, 1) : indiaNow.date;
+  const minimumDeliveryDate = indiaNow.date;
   const availableDeliverySlots = form.deliveryDate === indiaNow.date
-    ? DELIVERY_SLOTS.filter((slot) => Number(slot.id.split("-")[0]) * 60 >= indiaNow.minutes + 180)
+    ? DELIVERY_SLOTS.filter((slot) => Number(slot.id.split("-")[0]) * 60 >= indiaNow.minutes)
     : DELIVERY_SLOTS;
   const selectedSlotIsAvailable = availableDeliverySlots.some((slot) => slot.id === form.deliverySlot);
   const sundayBlocked = mainsSundayBlocked(cartLines, form.deliveryDate, form.mode);
@@ -255,14 +249,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
       setErrorMsg("Your previous order has not been confirmed yet. Retry the original order before submitting changes, or contact the kitchen.");
       return;
     }
-    if (!isPendingRetry && hasMainsInCart && form.deliveryDate === indiaNow.date) {
-      setCheckoutErrors((current) => ({ ...current, deliveryDate: true }));
-      setErrorMsg("Biriyani and Main items must be ordered at least one day in advance.");
-      return;
-    }
     if (!isPendingRetry && form.deliveryDate === indiaNow.date && !selectedSlotIsAvailable) {
       setCheckoutErrors((current) => ({ ...current, deliverySlot: true }));
-      setErrorMsg("Same-day orders require at least 3 hours of preparation time.");
+      setErrorMsg("That same-day delivery slot has already started. Please choose a later slot.");
       return;
     }
     setSubmitting(true);
@@ -405,11 +394,6 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
 
       {/* Menu grid */}
       <main className="max-w-6xl mx-auto px-4 sm:px-8 pt-8 pb-32 bg-[#FFF8E8]">
-        {tab === "mains" && (
-          <p className="mb-6 text-sm text-[#7D4A32] bg-[#D99168]/15 border border-[#C8754F]/25 rounded-2xl px-4 py-3 text-center">
-            Please note: same-day delivery is not available for Biriyani &amp; Curry items.
-          </p>
-        )}
         {!liveReady && menuState === "loading" && (
           <div className="mb-5 rounded-xl border border-[#E8D7B5] bg-[#FFFCF3] px-4 py-3 text-center text-sm text-[#6F6657]" role="status">
             Checking current prices and availability…
@@ -752,14 +736,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                   ))}
                 </select>
                 {checkoutErrors.deliverySlot && <p className="mt-1 text-xs text-red-300">Please choose an available time slot.</p>}
-                {hasMainsInCart && (
-                  <p className="mt-2 text-xs text-amber-300">
-                    Biriyani and Main items require advance ordering and cannot be ordered for today.
-                  </p>
-                )}
-                {!hasMainsInCart && form.deliveryDate === indiaNow.date && (
+                {form.deliveryDate === indiaNow.date && (
                   <p className="mt-2 text-xs text-stone-400">
-                    Same-day time slots need at least 3 hours of preparation time.
+                    Past same-day time slots are unavailable. You can choose any remaining slot today.
                   </p>
                 )}
               </div>

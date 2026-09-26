@@ -9,6 +9,24 @@ const WHATSAPP_NOTIFICATIONS_ENABLED =
   process.env.WHATSAPP_NOTIFICATIONS_ENABLED === "true";
 const ADMIN_EMAIL_TIMEOUT_MS = 5_000;
 
+async function notifyAcceptedOrder(order) {
+  if (!WHATSAPP_NOTIFICATIONS_ENABLED || order.previousStatus === "accepted") return;
+  if (!order.customer_phone) {
+    console.warn(`⚠️ Order ${order.id} has no phone on file — skipped WhatsApp invoice notification`);
+    return;
+  }
+  if (!process.env.PUBLIC_API_BASE_URL) {
+    console.warn("⚠️ PUBLIC_API_BASE_URL not set — skipped WhatsApp invoice notification");
+    return;
+  }
+  try {
+    const invoiceUrl = `${process.env.PUBLIC_API_BASE_URL}/api/invoices/${order.id}?token=${encodeURIComponent(order.invoice_share_token)}`;
+    await sendInvoiceNotification(order.customer_phone, order.customer_name || "Customer", invoiceUrl, order.total);
+  } catch (err) {
+    console.error(`❌ Failed to send accepted-order WhatsApp notification for ${order.id}:`, err.message);
+  }
+}
+
 async function waitForAdminEmail() {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
@@ -90,19 +108,8 @@ const updateOrderStatus = async (req, res) => {
     // serverless function returns, rather than risking being killed
     // mid-flight — but a WhatsApp failure never fails the status update
     // itself, it's only logged.
-    if (WHATSAPP_NOTIFICATIONS_ENABLED && status === "accepted" && order.previousStatus !== "accepted") {
-      if (!order.customer_phone) {
-        console.warn(`⚠️ Order ${order.id} has no phone on file — skipped WhatsApp invoice notification`);
-      } else if (!process.env.PUBLIC_API_BASE_URL) {
-        console.warn("⚠️ PUBLIC_API_BASE_URL not set — skipped WhatsApp invoice notification");
-      } else {
-        try {
-          const invoiceUrl = `${process.env.PUBLIC_API_BASE_URL}/api/invoices/${order.id}?token=${encodeURIComponent(order.invoice_share_token)}`;
-          await sendInvoiceNotification(order.customer_phone, order.customer_name || "Customer", invoiceUrl, order.total);
-        } catch (err) {
-          console.error(`❌ Failed to send accepted-order WhatsApp notification for ${order.id}:`, err.message);
-        }
-      }
+    if (status === "accepted") {
+      await notifyAcceptedOrder(order);
     } else if (WHATSAPP_NOTIFICATIONS_ENABLED && status === "declined" && order.previousStatus !== "declined") {
       if (!order.customer_phone) {
         console.warn(`⚠️ Order ${order.id} has no phone on file — skipped WhatsApp decline notification`);
@@ -126,6 +133,32 @@ const updateOrderStatus = async (req, res) => {
       success: false,
       code: err.code,
       message: statusCode === 500 ? "Failed to update order" : err.message,
+    });
+  }
+};
+
+
+const acceptEditedOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, code: "INVALID_ORDER", message: "Include at least one item before accepting the order" });
+    }
+    const order = await orderModel.acceptEditedOrder(id, items);
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    await notifyAcceptedOrder(order);
+    res.json({ success: true, data: order });
+  } catch (err) {
+    console.error("❌ Failed to accept edited order:", err.message);
+    if (err.code === '42P01') return res.status(503).json({ success: false,
+      message: 'Order stock tracking needs database setup. Apply order_stock.sql before accepting orders.' });
+    const statusCode = err.code === "INSUFFICIENT_STOCK" ? 409
+      : ["INVALID_ORDER", "INVALID_STATUS_TRANSITION"].includes(err.code) ? 400 : 500;
+    res.status(statusCode).json({
+      success: false,
+      code: err.code,
+      message: statusCode === 500 ? "Failed to accept edited order" : err.message,
     });
   }
 };
@@ -199,4 +232,4 @@ const deletePaidSyncedOrders = async (req, res) => {
   }
 };
 
-module.exports = { getOrders, createOrder, updateOrderStatus, updatePaymentStatus, deleteOrder, getArchivedOrders, archiveOrders, deletePaidSyncedOrders };
+module.exports = { getOrders, createOrder, updateOrderStatus, acceptEditedOrder, updatePaymentStatus, deleteOrder, getArchivedOrders, archiveOrders, deletePaidSyncedOrders };

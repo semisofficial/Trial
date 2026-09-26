@@ -16,6 +16,10 @@ Save,
   Download,
   Share2,
   Clock,
+  ChevronDown,
+  ArrowLeftRight,
+  Plus,
+  Minus,
 } from "lucide-react";
 import {
   FONTS,
@@ -33,6 +37,7 @@ import {
   archiveOrdersApi,
   deletePaidSyncedOrdersApi,
   updateOrderStatusApi,
+  acceptEditedOrderApi,
   updatePaymentStatusApi,
   paymentMethodLabel,
   deliverySlotLabel,
@@ -47,7 +52,7 @@ import {
   checkAdminSession,
   adminLogout,
 } from "./lib/kitchen.jsx";
-import { formatIndiaDate, indiaCalendarDateKey } from "./lib/dateTime.js";
+import { formatIndiaDate, formatIndiaDateTime, indiaCalendarDateKey, indiaRangeBounds, indiaWeekLabel } from "./lib/dateTime.js";
 import ItemsManager from "./components/ItemsManager.jsx";
 
 /* ---------------------------------------------------------
@@ -83,6 +88,9 @@ export default function Admin() {
   const [stockDraft, setStockDraft] = useState({});
   const [invoiceBatchInfo, setInvoiceBatchInfo] = useState({ totalInvoices: 0, batchSize: 3, totalBatches: 0 });
   const [downloadingBatch, setDownloadingBatch] = useState(null);
+  const [expandedOrders, setExpandedOrders] = useState({});
+  const [orderDrafts, setOrderDrafts] = useState({});
+  const [editedAcceptPending, setEditedAcceptPending] = useState({});
 
   const refreshMenu = useCallback(async () => setMenu(await loadAdminMenu()), []);
   const refreshInventory = useCallback(async () => setInventory(await loadAdminInventory()), []);
@@ -199,6 +207,82 @@ export default function Admin() {
       if (!committed && order) {
         setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: order.status } : o)));
       }
+    }
+  };
+
+  const toggleOrderEditor = (order) => {
+    setExpandedOrders((current) => ({ ...current, [order.id]: !current[order.id] }));
+    setOrderDrafts((current) => current[order.id] ? current : {
+      ...current,
+      [order.id]: order.items.map((item) => ({
+        originalId: item.id, id: item.id, name: item.name, qty: item.qty, price: item.price,
+        included: true, swapOpen: false,
+      })),
+    });
+  };
+
+  const patchDraftLine = (orderId, index, updater) => {
+    setOrderDrafts((current) => {
+      const lines = [...(current[orderId] || [])];
+      if (!lines[index]) return current;
+      lines[index] = typeof updater === "function" ? updater(lines[index]) : { ...lines[index], ...updater };
+      return { ...current, [orderId]: lines };
+    });
+  };
+
+  const adjustDraftQty = (orderId, index, direction) => {
+    patchDraftLine(orderId, index, (line) => {
+      const selected = menu.find((item) => item.id === line.id);
+      const step = Number(selected?.step) || 1;
+      const minQty = Number(selected?.minQty) || 1;
+      const next = Math.round((Number(line.qty) + direction * step) * 1000) / 1000;
+      return { ...line, qty: Math.max(minQty, next) };
+    });
+  };
+
+  const swapDraftItem = (orderId, index, itemId) => {
+    const selected = menu.find((item) => item.id === itemId);
+    if (!selected) return;
+    patchDraftLine(orderId, index, (line) => ({
+      ...line,
+      id: selected.id,
+      name: selected.name,
+      price: selected.price,
+      qty: Number(selected.minQty) || 1,
+      swapOpen: false,
+    }));
+  };
+
+  const omitShortageItems = (order) => {
+    const shortageGroups = new Set((order.stockShortages || []).map((shortage) => shortage.stockGroupId));
+    setOrderDrafts((current) => ({
+      ...current,
+      [order.id]: (current[order.id] || []).map((line) => {
+        const selected = menu.find((item) => item.id === line.id);
+        const stockGroupId = selected?.stockGroupId || line.id;
+        return shortageGroups.has(stockGroupId) ? { ...line, included: false } : line;
+      }),
+    }));
+  };
+
+  const handleAcceptEditedOrder = async (order) => {
+    const draft = orderDrafts[order.id] || [];
+    const items = draft.filter((line) => line.included).map((line) => ({ id: line.id, qty: line.qty }));
+    if (!items.length || editedAcceptPending[order.id]) {
+      if (!items.length) setDashboardError("Include at least one item before accepting the order.");
+      return;
+    }
+    setDashboardError("");
+    setEditedAcceptPending((current) => ({ ...current, [order.id]: true }));
+    try {
+      await acceptEditedOrderApi(order.id, items);
+      setExpandedOrders((current) => ({ ...current, [order.id]: false }));
+      setOrderDrafts((current) => { const next = { ...current }; delete next[order.id]; return next; });
+      await Promise.allSettled([refreshOrders(), refreshInventory(), refreshBatchInfo()]);
+    } catch {
+      // parseApiResponse already surfaces the actionable server message in the admin error banner.
+    } finally {
+      setEditedAcceptPending((current) => ({ ...current, [order.id]: false }));
     }
   };
 
@@ -335,37 +419,8 @@ export default function Admin() {
 /* ---------- Shared date-range helpers ---------- */
   const fmtDate = (ts) => formatIndiaDate(ts);
 
-  const weekLabel = (ts) => {
-    const start = new Date(ts);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    return `${fmtDate(start.getTime())} – ${fmtDate(end.getTime())}`;
-  };
-
-  // Compute the inclusive [start, end] timestamps for the selected range.
-  const rangeBounds = (range, ref) => {
-    const d = ref ? new Date(ref) : new Date();
-    d.setHours(12, 0, 0, 0); // midday to avoid TZ edge cases
-    const start = new Date(d);
-    const end = new Date(d);
-    if (range === "day") {
-      start.setHours(0, 0, 0, 0);
-      end.setHours(23, 59, 59, 999);
-    } else if (range === "week") {
-      // Monday-start week
-      const day = (d.getDay() + 6) % 7;
-      start.setDate(d.getDate() - day);
-      start.setHours(0, 0, 0, 0);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
-    } else if (range === "month") {
-      start.setDate(1);
-      start.setHours(0, 0, 0, 0);
-      end.setMonth(d.getMonth() + 1, 0);
-      end.setHours(23, 59, 59, 999);
-    }
-    return { start: start.getTime(), end: end.getTime() };
-  };
+  const weekLabel = indiaWeekLabel;
+  const rangeBounds = indiaRangeBounds;
 
   const inRange = (o) => {
     if (invRange === "all") return true;
@@ -450,7 +505,7 @@ export default function Admin() {
                     <Phone className="w-3 h-3" /> {o.customer.phone}
                     <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800">{o.customer.mode}</span>
                   </div>
-                  <div className="text-green-800/60 text-xs mt-0.5">{fmtDate(o.createdAt)}</div>
+                  <div className="text-green-800/60 text-xs mt-0.5">Ordered: {formatIndiaDateTime(o.createdAt)}</div>
                   {(o.customer.deliveryDate || o.customer.deliverySlot) && (
                     <div className="text-amber-700 text-xs mt-0.5 font-medium">
                       Wants it: {deliveryDateLabel(o.customer.deliveryDate)}{o.customer.deliverySlot ? `, ${deliverySlotLabel(o.customer.deliverySlot)}` : ""}
@@ -658,6 +713,7 @@ export default function Admin() {
                     <div>
                       <div className="font-mono text-xs text-green-800/50">{o.id}</div>
                       <div className="text-green-950 font-semibold">{o.customer.name}</div>
+                      <div className="text-green-800/60 text-xs mt-0.5">Ordered: {formatIndiaDateTime(o.createdAt)}</div>
                       <div className="flex items-center gap-1.5 text-green-800/70 text-xs mt-0.5">
                         <Phone className="w-3 h-3" /> {o.customer.phone}
                         <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800">{o.customer.mode}</span>
@@ -695,6 +751,17 @@ export default function Admin() {
                       )}
                     </div>
                     <div className="flex gap-2 items-center">
+                      {o.status === "pending" && (
+                        <button
+                          type="button"
+                          onClick={() => toggleOrderEditor(o)}
+                          aria-expanded={Boolean(expandedOrders[o.id])}
+                          aria-label={expandedOrders[o.id] ? "Close order editing options" : "Open order editing options"}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-green-200 text-green-800 hover:bg-green-50"
+                        >
+                          <ChevronDown className={`h-4 w-4 transition-transform ${expandedOrders[o.id] ? "rotate-180" : ""}`} />
+                        </button>
+                      )}
                       <StatusPill status={o.status} />
                       {o.status === "accepted" && (
                         <button
@@ -727,6 +794,96 @@ export default function Admin() {
                       </div>
                     ))}
                   </div>
+                  {o.status === "pending" && expandedOrders[o.id] && (() => {
+                    const draft = orderDrafts[o.id] || [];
+                    const editableMenu = menu.filter((item) => item.available && !item.isDraft);
+                    const included = draft.filter((line) => line.included);
+                    const editedTotal = included.reduce((sum, line) => sum + Number(line.qty) * Number(line.price), 0);
+                    return (
+                      <section className="mt-3 rounded-xl border border-green-200 bg-green-50/60 p-3" aria-label="Edit pending order">
+                        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-sm font-semibold text-green-950">Order options</h3>
+                            <p className="text-xs text-green-800/70">Omit unavailable lines, change quantities, or swap an item before accepting.</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {o.stockShortages?.length > 0 && (
+                              <button type="button" onClick={() => omitShortageItems(o)} className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100">
+                                Omit shortage items
+                              </button>
+                            )}
+                            <div className="text-right text-xs text-green-800/70">
+                              <div>Included total</div>
+                              <div className="text-sm font-semibold text-amber-600">{rupee(editedTotal)}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          {draft.map((line, index) => {
+                            const selected = menu.find((item) => item.id === line.id);
+                            const step = Number(selected?.step) || 1;
+                            const minQty = Number(selected?.minQty) || 1;
+                            return (
+                              <div key={`${line.originalId}-${index}`} className={`rounded-lg border p-2.5 ${line.included ? "border-green-200 bg-white" : "border-stone-200 bg-stone-50 opacity-70"}`}>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-sm font-medium text-green-950">{line.name}</div>
+                                    <div className="text-xs text-green-800/60">{rupee(Number(line.price))} each · {rupee(Number(line.price) * Number(line.qty))}</div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => patchDraftLine(o.id, index, (current) => ({ ...current, included: !current.included }))}
+                                      className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium ${line.included ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-stone-300 bg-white text-stone-600"}`}
+                                    >
+                                      {line.included ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                                      {line.included ? "Include" : "Omit"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => patchDraftLine(o.id, index, (current) => ({ ...current, swapOpen: !current.swapOpen }))}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-green-300 bg-white px-2 py-1.5 text-xs font-medium text-green-800 hover:bg-green-50"
+                                    >
+                                      <ArrowLeftRight className="h-3.5 w-3.5" /> Swap
+                                    </button>
+                                  </div>
+                                </div>
+                                {line.swapOpen && (
+                                  <select
+                                    value={line.id}
+                                    onChange={(event) => swapDraftItem(o.id, index, event.target.value)}
+                                    className="mt-2 w-full rounded-lg border border-green-200 bg-white px-2.5 py-2 text-sm text-green-950 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                                  >
+                                    {editableMenu.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                                  </select>
+                                )}
+                                <div className="mt-2 flex items-center justify-between gap-3">
+                                  <span className="text-xs text-green-800/60">Quantity {selected?.unit ? `· ${selected.unit}` : ""}</span>
+                                  <div className="flex items-center gap-2">
+                                    <button type="button" onClick={() => adjustDraftQty(o.id, index, -1)} disabled={Number(line.qty) <= minQty} className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-green-200 bg-white text-green-800 disabled:opacity-40"><Minus className="h-3.5 w-3.5" /></button>
+                                    <span className="min-w-10 text-center text-sm font-semibold text-green-950">{line.qty}</span>
+                                    <button type="button" onClick={() => adjustDraftQty(o.id, index, 1)} className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-green-200 bg-white text-green-800"><Plus className="h-3.5 w-3.5" /></button>
+                                    {step !== 1 && <span className="text-[10px] text-green-800/50">step {step}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-green-200 pt-3">
+                          <p className="max-w-md text-xs text-green-800/60">This action saves the included lines and accepts them atomically. If stock changed meanwhile, nothing is changed and you can adjust again.</p>
+                          <button
+                            type="button"
+                            onClick={() => handleAcceptEditedOrder(o)}
+                            disabled={!included.length || editedAcceptPending[o.id]}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-green-800 px-3 py-2 text-sm font-semibold text-white hover:bg-green-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Check className="h-4 w-4" /> {editedAcceptPending[o.id] ? "Accepting…" : "Accept included items"}
+                          </button>
+                        </div>
+                      </section>
+                    );
+                  })()}
                   {o.status === "pending" && o.stockShortages?.length > 0 && (
                     <section aria-label="Stock shortages" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
                       <h3 className="font-semibold">Production needed</h3>
@@ -766,7 +923,7 @@ export default function Admin() {
                             onClick={() => setOrderStatus(o.id, "accepted")}
                             className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-400 text-green-950 hover:bg-amber-300"
                           >
-                            <Check className="w-3.5 h-3.5" /> Accept
+                            <Check className="w-3.5 h-3.5" /> {expandedOrders[o.id] ? "Accept full order" : "Accept"}
                           </button>
                         </>
                       )}
@@ -802,8 +959,7 @@ export default function Admin() {
           // Group by day (calendar date)
           const byDay = new Map();
           searched.forEach((o) => {
-            const d = new Date(o.createdAt);
-            const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+            const key = indiaRangeBounds('day', o.createdAt).start;
             if (!byDay.has(key)) byDay.set(key, []);
             byDay.get(key).push(o);
           });
@@ -812,23 +968,11 @@ export default function Admin() {
           // Group by week (Mon-Sun)
           const byWeek = new Map();
           searched.forEach((o) => {
-            const d = new Date(o.createdAt);
-            const day = (d.getDay() + 6) % 7; // Mon=0 ... Sun=6
-            const weekStart = new Date(d);
-            weekStart.setDate(d.getDate() - day);
-            weekStart.setHours(0, 0, 0, 0);
-            const key = weekStart.getTime();
+            const key = indiaRangeBounds('week', o.createdAt).start;
             if (!byWeek.has(key)) byWeek.set(key, []);
             byWeek.get(key).push(o);
           });
           const weeks = Array.from(byWeek.entries()).sort((a, b) => b[0] - a[0]);
-
-const weekLabel = (ts) => {
-            const start = new Date(ts);
-            const end = new Date(start);
-            end.setDate(start.getDate() + 6);
-            return `${fmtDate(start.getTime())} – ${fmtDate(end.getTime())}`;
-          };
 
 // Default view: flat list of all invoices sorted newest-first.
           // Toggling "By day"/"By week" groups them; toggling the active one
@@ -991,7 +1135,7 @@ const weekLabel = (ts) => {
                                 <Phone className="w-3 h-3" /> {o.customer.phone}
                                 <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800">{o.customer.mode}</span>
                               </div>
-                              <div className="text-green-800/60 text-xs mt-0.5">{fmtDate(o.createdAt)}</div>
+                              <div className="text-green-800/60 text-xs mt-0.5">Ordered: {formatIndiaDateTime(o.createdAt)}</div>
                             </div>
                             <div className="text-right">
                               <StatusPill status={o.status} />
@@ -1047,7 +1191,7 @@ const weekLabel = (ts) => {
                                         <Phone className="w-3 h-3" /> {o.customer.phone}
                                         <span className="ml-2 px-1.5 py-0.5 rounded bg-green-100 text-green-800">{o.customer.mode}</span>
                                       </div>
-                                      <div className="text-green-800/60 text-xs mt-0.5">{fmtDate(o.createdAt)}</div>
+                                      <div className="text-green-800/60 text-xs mt-0.5">Ordered: {formatIndiaDateTime(o.createdAt)}</div>
                                     </div>
                                     <div className="text-right">
                                       <StatusPill status={o.status} />
@@ -1209,17 +1353,7 @@ const periodRevenue = sold.reduce((s, o) => s + (o.total || 0), 0);
             .slice(0, 10);
 
           // Group sold orders by day or by week for the breakdown panel.
-          const groupSold = (o) => {
-            const d = new Date(o.createdAt);
-            if (salesGroup === "week") {
-              const day = (d.getDay() + 6) % 7; // Mon=0 ... Sun=6
-              const weekStart = new Date(d);
-              weekStart.setDate(d.getDate() - day);
-              weekStart.setHours(0, 0, 0, 0);
-              return weekStart.getTime();
-            }
-            return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-          };
+          const groupSold = (o) => indiaRangeBounds(salesGroup, o.createdAt).start;
           const byPeriod = new Map();
           sold.forEach((o) => {
             const key = groupSold(o);

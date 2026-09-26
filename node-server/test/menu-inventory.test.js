@@ -84,7 +84,7 @@ test("Sunday mains-only delivery is blocked but either snack type permits a mixe
   assert.throws(() => orders.validateMainsTiming(mains, customer, "Delivery", "2026-09-12"), /Sunday/);
   for (const categoryId of ["fried", "frozen"]) orders.validateMainsTiming([...mains, { categoryId }], customer, "Delivery", "2026-09-12");
   orders.validateMainsTiming(mains, customer, "Pickup", "2026-09-12");
-  assert.throws(() => orders.validateMainsTiming([...mains, { categoryId: "fried" }], customer, "Delivery", customer.deliveryDate), /advance/);
+  orders.validateMainsTiming([...mains, { categoryId: "fried" }], customer, "Delivery", customer.deliveryDate);
 });
 
 function customer() {

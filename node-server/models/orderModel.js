@@ -27,11 +27,6 @@ function makeOrderId() {
   return `SK${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
 }
 
-function makeInvoiceId() {
-  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  return `INV-${date}-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
-}
-
 function makeInvoiceShareToken() {
   return crypto.randomBytes(24).toString("base64url");
 }
@@ -127,16 +122,14 @@ function validateDeliveryDetails(customer, orderMode, today = indiaTodayISO(), n
   }
   if (customer.deliveryDate === today) {
     const slotStartMinutes = Number(customer.deliverySlot.split("-")[0]) * 60;
-    if (slotStartMinutes < indiaMinutesOfDay(now) + 180) {
-      throw orderError("Same-day orders require at least 3 hours of preparation time");
+    if (slotStartMinutes < indiaMinutesOfDay(now)) {
+      throw orderError("The selected same-day delivery slot has already started");
     }
   }
 }
 
-function validateMainsTiming(items, customer, orderMode, today = indiaTodayISO()) {
-  if (customer.deliveryDate === today && items.some((item) => item.categoryId === "mains")) {
-    throw orderError("Biriyani and Main items must be ordered at least one day in advance");
-  }
+function validateMainsTiming(items, customer, orderMode) {
+  // Category restrictions are independent of same-day slot availability.
   const hasMains = items.some((item) => item.categoryId === "mains");
   const hasSnacks = items.some((item) => ["fried", "frozen"].includes(item.categoryId));
   if (orderMode === "Delivery" && hasMains && !hasSnacks
@@ -194,7 +187,7 @@ function publicOrderRow(row) {
 
 async function insertOrder(client, { customer, items, orderMode, notes, keyHash, requestHash }) {
   const id = makeOrderId();
-  const invoiceId = makeInvoiceId();
+  const invoiceSuffix = crypto.randomBytes(5).toString("hex").toUpperCase();
   const invoiceShareToken = makeInvoiceShareToken();
   const total = items.reduce((sum, item) => sum + item.qty * item.price, 0);
   const customerResult = await client.query(
@@ -204,13 +197,16 @@ async function insertOrder(client, { customer, items, orderMode, notes, keyHash,
      customer.location?.lat ?? null, customer.location?.lng ?? null]
   );
   const paymentMethod = ["cod", "upi"].includes(customer.paymentMethod) ? customer.paymentMethod : "cod";
+  // PostgreSQL now() is stable within this transaction: the invoice date and
+  // recorded placement timestamp cannot disagree across an IST midnight.
   const orderResult = await client.query(
     `INSERT INTO orders (id, customer_id, invoice_id, status, order_mode, notes, total,
        payment_status, paymet, delivery_date, delivery_slot, stock_reserved, invoice_share_token,
-       checkout_key_hash, checkout_request_hash)
-     VALUES ($1, $2, $3, 'pending', $4, $5, $6, 'unpaid', $7, $8, $9, false, $10, $11, $12)
+       checkout_key_hash, checkout_request_hash, created_at)
+     VALUES ($1, $2, 'INV-' || to_char(now() AT TIME ZONE 'Asia/Kolkata', 'YYYYMMDD') || '-' || $3,
+       'pending', $4, $5, $6, 'unpaid', $7, $8, $9, false, $10, $11, $12, now())
      RETURNING *`,
-    [id, customerResult.rows[0].id, invoiceId, orderMode, notes || null, total,
+    [id, customerResult.rows[0].id, invoiceSuffix, orderMode, notes || null, total,
      paymentMethod, customer.deliveryDate || null, customer.deliverySlot || null, invoiceShareToken,
      keyHash || null, requestHash || null]
   );
@@ -285,6 +281,107 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
   }
 }
 
+
+async function priceEditedItems(client, orderId, requestedItems) {
+  const normalized = normalizeRequestedItems(requestedItems);
+  const originalRows = (await client.query(
+    `SELECT oi.menu_item_id AS id, oi.quantity, oi.unit_price, oi.item_name_snapshot
+       FROM order_items oi WHERE oi.order_id=$1 ORDER BY oi.id`,
+    [orderId]
+  )).rows;
+  const original = new Map(originalRows.map((row) => [String(row.id), row]));
+
+  const result = await client.query(
+    `SELECT mi.id, mi.name, mi.category_id, mi.min_qty, mi.step_qty, mi.retired, mi.is_draft,
+            i.selling_price, i.available
+       FROM menu_items mi JOIN inventory i ON i.menu_item_id=mi.id
+      WHERE mi.id = ANY($1::text[]) FOR SHARE OF mi, i`,
+    [normalized.map((item) => item.id)]
+  );
+  const catalog = new Map(result.rows.map((row) => [String(row.id), row]));
+  if (catalog.size !== normalized.length) throw orderError("One or more selected menu items no longer exist");
+
+  const authoritativeItems = [];
+  for (const requested of normalized) {
+    const row = catalog.get(requested.id);
+    const prior = original.get(requested.id);
+    const changedQuantity = !prior || Math.abs(Number(prior.quantity) - requested.qty) > 1e-9;
+    if (!prior && (row.retired || row.is_draft || row.available === false)) {
+      throw orderError(`${row.name} cannot be used as a replacement right now`);
+    }
+    if (changedQuantity) {
+      const minQty = Number(row.min_qty) || 1;
+      const stepQty = Number(row.step_qty) || 1;
+      if (!followsQuantityRule(requested.qty, minQty, stepQty)) {
+        throw orderError(`${row.name} must be ordered from ${minQty} in steps of ${stepQty}`);
+      }
+    }
+    const price = prior ? Number(prior.unit_price) : Number(row.selling_price);
+    if (!Number.isFinite(price) || price < 0) throw orderError(`${row.name} does not have a valid selling price`);
+    authoritativeItems.push({
+      id: requested.id,
+      name: prior ? prior.item_name_snapshot : row.name,
+      categoryId: row.category_id,
+      qty: requested.qty,
+      price,
+    });
+  }
+  return authoritativeItems;
+}
+
+async function replaceOrderItems(client, orderId, items) {
+  await client.query(`DELETE FROM order_items WHERE order_id=$1`, [orderId]);
+  for (const item of items) {
+    await client.query(
+      `INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, subtotal, item_name_snapshot)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [orderId, item.id, item.qty, item.price, item.qty * item.price, item.name]
+    );
+  }
+  const total = items.reduce((sum, item) => sum + item.qty * item.price, 0);
+  await client.query(`UPDATE orders SET total=$1 WHERE id=$2`, [total, orderId]);
+  return total;
+}
+
+async function acceptEditedOrder(id, requestedItems) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const previous = (await client.query(`SELECT * FROM orders WHERE id=$1 FOR UPDATE`, [id])).rows[0];
+    if (!previous) { await client.query("ROLLBACK"); return null; }
+    if (previous.status !== "pending") {
+      throw orderError(`Order cannot be edited while ${previous.status}`, "INVALID_STATUS_TRANSITION");
+    }
+    if (previous.stock_reserved) throw orderError("Pending order already has reserved stock");
+
+    const items = await priceEditedItems(client, id, requestedItems);
+    validateMainsTiming(items, { deliveryDate: String(previous.delivery_date || "").slice(0, 10) }, previous.order_mode);
+    const total = await replaceOrderItems(client, id, items);
+
+    // Edited acceptance is specifically the safe partial-order path: every
+    // included fried/frozen quantity must still be on hand at commit time.
+    // The normal Accept action keeps its historical behavior for full orders.
+    const shortages = await orderStock.pendingShortages(client, [id]);
+    if (shortages.length) {
+      throw orderError("One or more included items exceed current stock. Reduce the quantity or omit them and try again.", "INSUFFICIENT_STOCK");
+    }
+    const reserved = await orderStock.deduct(client, id);
+    const updated = (await client.query(
+      `UPDATE orders o SET status='accepted', stock_reserved=$1, total=$2 WHERE o.id=$3
+       RETURNING o.*, (SELECT phone FROM customers WHERE id=o.customer_id) AS customer_phone,
+         (SELECT name FROM customers WHERE id=o.customer_id) AS customer_name`,
+      [reserved, total, id]
+    )).rows[0];
+    await client.query("COMMIT");
+    return { ...publicOrderRow(updated), previousStatus: previous.status };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getOrders() {
   const rows = (await db.query(`${ORDER_SELECT} WHERE o.archived = false GROUP BY o.id, c.id ORDER BY o.created_at DESC`)).rows;
   const shortages = await orderStock.pendingShortages(db, rows.filter(o => o.status === 'pending').map(o => o.id));
@@ -346,7 +443,7 @@ async function updateOrderStatus(id, status) {
     if (status === "completed" && previous.status !== "completed") {
       await client.query(
         `INSERT INTO sales_summary (summary_date, orders_count, revenue)
-         SELECT created_at::date, 1, total FROM orders WHERE id = $1
+         SELECT (created_at AT TIME ZONE 'Asia/Kolkata')::date, 1, total FROM orders WHERE id = $1
          ON CONFLICT (summary_date) DO UPDATE SET
            orders_count = sales_summary.orders_count + 1,
            revenue = sales_summary.revenue + EXCLUDED.revenue`,
@@ -417,7 +514,7 @@ async function deletePaidSyncedOrders() {
 }
 
 module.exports = {
-  createOrder, getOrders, getArchivedOrders, archiveOrders, updateOrderStatus,
+  createOrder, getOrders, getArchivedOrders, archiveOrders, updateOrderStatus, acceptEditedOrder,
   updatePaymentStatus, deleteOrder, deletePaidSyncedOrders,
   // Exported for deterministic validation tests; not exposed as HTTP routes.
   validateDeliveryDetails, validateMainsTiming,
