@@ -13,6 +13,8 @@ router.delete("/paid-synced", requireAdmin, controller.deletePaidSyncedOrders); 
 router.put("/:id/status", requireAdmin, controller.updateOrderStatus);
 router.put("/:id/accept-edited", requireAdmin, controller.acceptEditedOrder);
 router.put("/:id/payment", requireAdmin, controller.updatePaymentStatus);
+router.delete("/:id/completed", requireAdmin, controller.deleteCompletedOrder); // keep above /:id
 router.delete("/:id", requireAdmin, controller.deleteOrder);
+
 
 module.exports = router;

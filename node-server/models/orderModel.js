@@ -495,6 +495,47 @@ async function deleteOrder(id) {
   }
 }
 
+async function deleteCompletedOrder(id) {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    // Lock the row to prevent a race with concurrent status changes.
+    // The guard (status = 'completed' AND stock_reserved = false) mirrors
+    // the requested SQL:
+    //   DELETE FROM orders WHERE id = $1 AND stock_reserved = false
+    // An order reaches 'completed' only via updateOrderStatus which
+    // already sets stock_reserved = false, so the two guards are
+    // equivalent in practice. Both are kept here for defence-in-depth.
+    const found = await client.query(
+      `SELECT id, customer_id, status, stock_reserved
+         FROM orders WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (!found.rows[0]) { await client.query("ROLLBACK"); return { deleted: false, reason: "not_found" }; }
+    const row = found.rows[0];
+    if (row.status !== "completed") {
+      await client.query("ROLLBACK");
+      return { deleted: false, reason: "not_completed" };
+    }
+    if (row.stock_reserved) {
+      await client.query("ROLLBACK");
+      return { deleted: false, reason: "stock_reserved" };
+    }
+    await client.query(
+      `DELETE FROM orders WHERE id = $1 AND stock_reserved = false`,
+      [id]
+    );
+    await deleteUnreferencedCustomers(client, [row.customer_id]);
+    await client.query("COMMIT");
+    return { deleted: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function deletePaidSyncedOrders() {
   const client = await db.connect();
   try {
@@ -515,7 +556,8 @@ async function deletePaidSyncedOrders() {
 
 module.exports = {
   createOrder, getOrders, getArchivedOrders, archiveOrders, updateOrderStatus, acceptEditedOrder,
-  updatePaymentStatus, deleteOrder, deletePaidSyncedOrders,
+  updatePaymentStatus, deleteOrder, deleteCompletedOrder, deletePaidSyncedOrders,
   // Exported for deterministic validation tests; not exposed as HTTP routes.
   validateDeliveryDetails, validateMainsTiming,
 };
+

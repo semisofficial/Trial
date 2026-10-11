@@ -190,6 +190,31 @@ const deleteOrder = async (req, res) => {
   }
 };
 
+// DELETE /api/orders/:id/completed
+// Permanently removes a single completed order. The order must be in
+// 'completed' status with stock_reserved = false; invoices, payments, and
+// the sales summary are intentionally left untouched.
+const deleteCompletedOrder = async (req, res) => {
+  try {
+    const result = await orderModel.deleteCompletedOrder(req.params.id);
+    if (!result.deleted) {
+      const status = result.reason === "not_found" ? 404 : 409;
+      const message =
+        result.reason === "not_found"
+          ? "Order not found"
+          : result.reason === "stock_reserved"
+          ? "Order still has reserved stock and cannot be deleted"
+          : "Only completed orders can be deleted from this action";
+      return res.status(status).json({ success: false, message });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Failed to delete completed order:", err.message);
+    res.status(500).json({ success: false, message: "Failed to delete completed order" });
+  }
+};
+
+
 const getArchivedOrders = async (req, res) => {
   try {
     const orders = await orderModel.getArchivedOrders();
@@ -232,4 +257,5 @@ const deletePaidSyncedOrders = async (req, res) => {
   }
 };
 
-module.exports = { getOrders, createOrder, updateOrderStatus, acceptEditedOrder, updatePaymentStatus, deleteOrder, getArchivedOrders, archiveOrders, deletePaidSyncedOrders };
+module.exports = { getOrders, createOrder, updateOrderStatus, acceptEditedOrder, updatePaymentStatus, deleteOrder, deleteCompletedOrder, getArchivedOrders, archiveOrders, deletePaidSyncedOrders };
+

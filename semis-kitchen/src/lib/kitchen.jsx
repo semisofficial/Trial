@@ -454,6 +454,15 @@ export async function deleteOrderApi(id) {
   await parseApiResponse(res, "Unable to delete order");
 }
 
+/* Permanently removes a single order from the Completed tab.
+   The backend enforces status = 'completed' AND stock_reserved = false.
+   Invoice data, payment records, and the sales summary are not affected. */
+export async function deleteCompletedOrderApi(id) {
+  const res = await adminRequest(`/orders/${encodeURIComponent(id)}/completed`, { method: "DELETE" });
+  await parseApiResponse(res, "Unable to delete completed order");
+}
+
+
 /* Deletes orders that are completed, paid, and already confirmed synced to
    the Google Sheet — see the Admin Invoices tab's "Delete paid & synced"
    button. Returns how many rows were actually deleted. */

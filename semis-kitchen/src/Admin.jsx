@@ -51,7 +51,9 @@ import {
   adminLogin,
   checkAdminSession,
   adminLogout,
+  deleteCompletedOrderApi,
 } from "./lib/kitchen.jsx";
+
 import { formatIndiaDate, formatIndiaDateTime, indiaCalendarDateKey, indiaRangeBounds, indiaWeekLabel } from "./lib/dateTime.js";
 import ItemsManager from "./components/ItemsManager.jsx";
 
@@ -374,6 +376,31 @@ export default function Admin() {
     await archiveOrdersApi(toClear.map((o) => o.id));
     await refreshArchived();
     await refreshOrders();
+  };
+
+  // Permanently delete a single completed order (no invoice / sales impact).
+  // The backend enforces status='completed' AND stock_reserved=false via the
+  // targeted SQL: DELETE FROM orders WHERE id = $1 AND stock_reserved = false
+  const deleteCompletedOrder = async (order) => {
+    const confirmed = window.confirm(
+      `Delete this completed order?\n\n` +
+      `${order.customer.name} · ${order.id}\n\n` +
+      `This cannot be undone. The invoice, payment record, and sales summary ` +
+      `are not affected.`
+    );
+    if (!confirmed) return;
+    // Optimistic removal for instant feedback
+    setOrders((prev) => prev.filter((o) => o.id !== order.id));
+    try {
+      await deleteCompletedOrderApi(order.id);
+    } catch {
+      // Revert if the server rejected the deletion
+      setOrders((prev) => {
+        // Only re-insert if it isn't already back (concurrent refresh)
+        if (prev.some((o) => o.id === order.id)) return prev;
+        return [order, ...prev];
+      });
+    }
   };
 
   if (authChecking) {
@@ -933,6 +960,15 @@ export default function Admin() {
                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-sky-100 text-sky-700 hover:bg-sky-200"
                         >
                           <Package className="w-3.5 h-3.5" /> Mark completed
+                        </button>
+                      )}
+                      {o.status === "completed" && (
+                        <button
+                          onClick={() => deleteCompletedOrder(o)}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-red-300 text-red-600 bg-red-50 hover:bg-red-100"
+                          title="Permanently delete this completed order"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
                         </button>
                       )}
                     </div>
