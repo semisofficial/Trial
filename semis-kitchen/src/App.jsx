@@ -172,7 +172,8 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     setCart((c) => {
       const current = c[item.id] || 0;
       const next = current === 0 ? minQty : current + step;
-      return { ...c, [item.id]: Math.round(next * 100) / 100 };
+      // 3 decimal places, matching the server's quantity validation.
+      return { ...c, [item.id]: Math.round(next * 1000) / 1000 };
     });
   };
   const decItem = (id, item) => {
@@ -181,7 +182,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
       if (!next[id]) return next;
       const step = item?.step || 1;
       const minQty = item?.minQty || 1;
-      next[id] = Math.round((next[id] - step) * 100) / 100;
+      next[id] = Math.round((next[id] - step) * 1000) / 1000;
       if (next[id] < minQty) delete next[id];
       return next;
     });
@@ -194,6 +195,17 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
       return { ...base, qty, price: priceOf(base) };
     })
     .filter(Boolean);
+  // Items the kitchen paused or removed after the customer added them. They are
+  // never sent at checkout; tell the customer instead of dropping them silently.
+  const unavailableCartCount = liveReady
+    ? Object.keys(cart).filter((id) => !menu.some((m) => m.id === id)).length
+    : 0;
+  const unavailableCartNotice = unavailableCartCount > 0 && (
+    <p role="status" className="rounded-lg border border-amber-300/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+      {unavailableCartCount === 1 ? "1 item" : `${unavailableCartCount} items`} in your cart{" "}
+      {unavailableCartCount === 1 ? "is" : "are"} no longer available and won't be included in your order.
+    </p>
+  );
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0);
   const cartTotal = cartLines.reduce((s, l) => s + l.qty * l.price, 0);
   const cartPlacement = floatingCartPlacement(footerVisible, footerHeight);
@@ -543,6 +555,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
               <button onClick={() => setCartOpen(false)}><Plus className="w-5 h-5 text-stone-400" /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {unavailableCartNotice}
               {cartLines.length === 0 && <p className="text-stone-500 text-sm">Your cart is empty.</p>}
               {cartLines.map((l) => (
                 <div key={l.id} className="flex flex-col gap-2 border-b border-green-900/60 pb-3">
@@ -754,6 +767,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
               <span className="text-sm">Order total</span>
               <span className="font-semibold text-amber-400">{rupee(cartTotal)}</span>
             </div>
+            {unavailableCartNotice && <div className="mt-2">{unavailableCartNotice}</div>}
             {errorMsg && (
               <p role="alert" className="text-red-400 text-sm mt-2">{errorMsg}</p>
             )}
@@ -840,14 +854,21 @@ export default function App() {
   const [liveReady, setLiveReady] = useState(false);
   const [menuState, setMenuState] = useState("loading");
   const menuRequest = useRef(0);
+  // True once one live menu has loaded. Background refreshes then keep showing
+  // that menu (and the customer's cart) instead of blanking it on a network
+  // blip. Checkout still re-validates prices and availability on the server.
+  const hasLiveMenu = useRef(false);
 
   const refreshMenu = useCallback(async () => {
     const request = ++menuRequest.current;
-    setLiveReady(false);
-    setMenuState("loading");
+    if (!hasLiveMenu.current) {
+      setLiveReady(false);
+      setMenuState("loading");
+    }
     try {
       const liveMenu = await loadMenu();
       if (request !== menuRequest.current) return;
+      hasLiveMenu.current = true;
       setMenu(liveMenu);
       setInventory(Object.fromEntries(liveMenu.map((item) => [item.id, {
         stock: item.stock,
@@ -857,7 +878,7 @@ export default function App() {
       setLiveReady(true);
       setMenuState("ready");
     } catch {
-      if (request !== menuRequest.current) return;
+      if (request !== menuRequest.current || hasLiveMenu.current) return;
       setLiveReady(false);
       setMenu([]);
       setMenuState("error");

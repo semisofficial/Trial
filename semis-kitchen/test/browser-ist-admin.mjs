@@ -11,7 +11,9 @@ try{
     await context.route('**/*',route=>{
       const url=new URL(route.request().url());
       if(url.origin!==new URL(base).origin)return route.abort();
-      if(url.pathname.startsWith('/api/'))return route.fulfill({json:{success:true,authenticated:true,data:url.pathname==='/api/orders'?orders:[]}});
+      // Sales totals come from the permanent daily summary (IST days of the four orders above).
+      const summary=[{date:'2026-03-02',orders_count:1,revenue:'100'},{date:'2026-03-01',orders_count:2,revenue:'200'},{date:'2026-02-28',orders_count:1,revenue:'100'}];
+      if(url.pathname.startsWith('/api/'))return route.fulfill({json:{success:true,authenticated:true,data:url.pathname==='/api/orders'?orders:url.pathname==='/api/sales/summary'?summary:[]}});
       return route.continue();
     });
     const page=await context.newPage();

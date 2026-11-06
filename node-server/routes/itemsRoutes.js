@@ -71,6 +71,13 @@ function expected(req) {
 }
 router.post('/', async (req, res) => res.status(201).json({ success: true, data: await items.create(metadata(req.body)) }));
 router.put('/:id', async (req, res) => res.json({ success: true, data: await items.update(req.params.id, metadata(req.body), expected(req)) }));
+router.put('/:id/publication', async (req, res) => {
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)
+      || Object.keys(req.body).length !== 1 || typeof req.body.published !== 'boolean') {
+    throw items.problem(400, 'Publication status must be true or false.');
+  }
+  res.json({ success: true, data: await items.setPublished(req.params.id, req.body.published, expected(req)) });
+});
 router.delete('/:id', async (req, res) => {
   await items.retire(req.params.id, expected(req));
   res.json({ success: true });

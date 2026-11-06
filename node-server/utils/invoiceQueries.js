@@ -81,14 +81,12 @@ const ACCEPTED_ORDERS_COUNT_QUERY = `
   WHERE status = 'accepted';
 `;
 
-// Used only by the Google Sheet sync — targets 'completed' orders instead of
-// 'accepted' so a row is only pushed to the sheet once the order is fully
-// done (previously this reused ACCEPTED_ORDERS_QUERY, which meant orders
-// still in progress could get synced). Also only picks up orders that
-// haven't been synced yet (synced_at IS NULL) — previously this had no such
-// filter, so clicking "Sync to Sheets" more than once re-appended every
-// completed order's rows again each time, silently duplicating them in the
-// sheet. The controller sets synced_at after a successful push.
+// Used only by the Google Sheet sync. Selects orders that are completed AND
+// paid and not yet synced (synced_at IS NULL). Unpaid completed orders wait
+// until they are marked paid, so every synced row is a settled sale and the
+// "delete paid + synced" clean-up never removes an order missing from the
+// sheet. The sheet receives one row per order (not per line item); the
+// controller sets synced_at after a successful push.
 const COMPLETED_ORDERS_QUERY = `
   SELECT
     o.invoice_id,
@@ -111,7 +109,7 @@ const COMPLETED_ORDERS_QUERY = `
   JOIN customers c ON o.customer_id = c.id
   JOIN order_items oi ON o.id = oi.order_id
   JOIN menu_items mi ON mi.id = oi.menu_item_id
-  WHERE o.status = 'completed' AND o.synced_at IS NULL
+  WHERE o.status = 'completed' AND o.payment_status = 'paid' AND o.synced_at IS NULL
   ORDER BY o.id;
 `;
 

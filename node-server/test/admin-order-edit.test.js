@@ -94,3 +94,10 @@ test('edited acceptance is pending-only and rejects unavailable replacement item
   await orders.updateOrderStatus(second.id, 'accepted');
   await assert.rejects(orders.acceptEditedOrder(second.id, [{ id: 'edit-a', qty: 1 }]), (error) => error.code === 'INVALID_STATUS_TRANSITION');
 });
+
+test('admin order list labels each snack line as fried or frozen', async () => {
+  const order = await create();
+  const listed = (await orders.getOrders()).find((row) => row.id === order.id);
+  const categories = Object.fromEntries(listed.items.map((item) => [item.id, item.category]));
+  assert.deepEqual(categories, { 'edit-a': 'fried', 'edit-b': 'frozen' });
+});

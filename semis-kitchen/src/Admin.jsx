@@ -28,6 +28,7 @@ import {
   STATUS,
   Logo,
   StatusPill,
+  SnackTypeBadge,
   rupee,
   loadAdminMenu,
   loadAdminInventory,
@@ -52,7 +53,9 @@ import {
   checkAdminSession,
   adminLogout,
   deleteCompletedOrderApi,
+  fetchSalesSummary,
 } from "./lib/kitchen.jsx";
+import { normalizeSummaryRows, summaryInRange, summaryTotals, groupSummary } from "./lib/salesSummary.js";
 
 import { formatIndiaDate, formatIndiaDateTime, indiaCalendarDateKey, indiaRangeBounds, indiaWeekLabel } from "./lib/dateTime.js";
 import ItemsManager from "./components/ItemsManager.jsx";
@@ -86,6 +89,10 @@ export default function Admin() {
   const [menu, setMenu] = useState([]);
   const [orders, setOrders] = useState([]);
   const [archived, setArchived] = useState([]);
+  // Permanent daily sales totals (never reduced by bulk clean-up).
+  const [salesSummary, setSalesSummary] = useState([]);
+  // Order ids whose payment toggle request is in flight (blocks double taps).
+  const paymentInFlightRef = useRef(new Set());
   const [priceDraft, setPriceDraft] = useState({});
   const [stockDraft, setStockDraft] = useState({});
   const [invoiceBatchInfo, setInvoiceBatchInfo] = useState({ totalInvoices: 0, batchSize: 3, totalBatches: 0 });
@@ -106,6 +113,7 @@ export default function Admin() {
     setOrders(fetched.map((o) => (O[o.id] ? { ...o, status: O[o.id] } : o)));
   }, []);
   const refreshArchived = useCallback(async () => setArchived(await fetchArchivedOrders()), []);
+  const refreshSales = useCallback(async () => setSalesSummary(normalizeSummaryRows(await fetchSalesSummary())), []);
   const refreshBatchInfo = useCallback(async () => {
     try {
       setInvoiceBatchInfo(await fetchInvoiceBatchInfo());
@@ -142,17 +150,17 @@ export default function Admin() {
     const timer = setTimeout(() => {
       Promise.allSettled([
         refreshMenu(), refreshArchived(), refreshInventory(),
-        refreshOrders(), refreshBatchInfo(),
+        refreshOrders(), refreshBatchInfo(), refreshSales(),
       ]);
     }, 0);
     return () => clearTimeout(timer);
-  }, [unlocked, refreshMenu, refreshArchived, refreshInventory, refreshOrders, refreshBatchInfo]);
+  }, [unlocked, refreshMenu, refreshArchived, refreshInventory, refreshOrders, refreshBatchInfo, refreshSales]);
 
   const refreshAll = async () => {
     setDashboardError("");
     await Promise.allSettled([
       refreshMenu(), refreshArchived(), refreshInventory(),
-      refreshOrders(), refreshBatchInfo(),
+      refreshOrders(), refreshBatchInfo(), refreshSales(),
     ]);
   };
 
@@ -200,6 +208,7 @@ export default function Admin() {
       await refreshOrders();
       await refreshInventory();
       await refreshBatchInfo();
+      if (status === "completed") await refreshSales();
     } catch {
       const O = { ...orderStatusOverrideRef.current };
       delete O[id];
@@ -217,7 +226,7 @@ export default function Admin() {
     setOrderDrafts((current) => current[order.id] ? current : {
       ...current,
       [order.id]: order.items.map((item) => ({
-        originalId: item.id, id: item.id, name: item.name, qty: item.qty, price: item.price,
+        originalId: item.id, id: item.id, name: item.name, qty: item.qty, price: item.price, category: item.category,
         included: true, swapOpen: false,
       })),
     });
@@ -294,7 +303,10 @@ export default function Admin() {
     const active = orders.find((o) => o.id === id);
     const arch = archived.find((o) => o.id === id);
     const order = active || arch;
-    if (!order) return;
+    // Ignore a second tap while this order's request is still in flight;
+    // otherwise a fast double tap would send "paid" then "unpaid".
+    if (!order || paymentInFlightRef.current.has(id)) return;
+    paymentInFlightRef.current.add(id);
     const prev = order.paymentStatus;
     const next = prev === "paid" ? "unpaid" : "paid";
 
@@ -312,6 +324,8 @@ export default function Admin() {
       // Revert on failure
       setOrders((p) => p.map(revert));
       setArchived((p) => p.map(revert));
+    } finally {
+      paymentInFlightRef.current.delete(id);
     }
   };
 
@@ -378,21 +392,30 @@ export default function Admin() {
     await refreshOrders();
   };
 
-  // Permanently delete a single completed order (no invoice / sales impact).
-  // The backend enforces status='completed' AND stock_reserved=false via the
-  // targeted SQL: DELETE FROM orders WHERE id = $1 AND stock_reserved = false
+  // Bulk clean-up of genuine, paid and synced sales. Daily sales totals are kept.
+  // Active and archived lists both refresh, since eligible orders can be in either.
+  const deletePaidSynced = async () => {
+    const deletedCount = await deletePaidSyncedOrdersApi();
+    alert(`Deleted ${deletedCount} invoice${deletedCount === 1 ? "" : "s"}.`);
+    await Promise.allSettled([refreshArchived(), refreshOrders()]);
+  };
+
+  // Permanently delete a single completed order that was recorded by mistake.
+  // The backend removes its amount from the daily sales total; stock is not restored.
   const deleteCompletedOrder = async (order) => {
     const confirmed = window.confirm(
-      `Delete this completed order?\n\n` +
-      `${order.customer.name} · ${order.id}\n\n` +
-      `This cannot be undone. The invoice, payment record, and sales summary ` +
-      `are not affected.`
+      `Delete this completed order because it was wrong?\n\n` +
+      `${order.customer.name} · ${order.id} · ${rupee(order.total)}\n\n` +
+      `This cannot be undone. The order is removed from Sales, its payment ` +
+      `record is deleted, and the customer's invoice link will stop working. ` +
+      `Stock is not changed.`
     );
     if (!confirmed) return;
     // Optimistic removal for instant feedback
     setOrders((prev) => prev.filter((o) => o.id !== order.id));
     try {
       await deleteCompletedOrderApi(order.id);
+      await refreshSales();
     } catch {
       // Revert if the server rejected the deletion
       setOrders((prev) => {
@@ -815,8 +838,11 @@ export default function Admin() {
                   </div>
                   <div className="border-t border-green-100 pt-3 space-y-1">
                     {o.items.map((i) => (
-                      <div key={i.id} className="flex justify-between text-sm text-green-900">
-                        <span>{i.name} × {i.qty}</span>
+                      <div key={i.id} className="flex items-center justify-between gap-2 text-sm text-green-900">
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span>{i.name} × {i.qty}</span>
+                          <SnackTypeBadge category={i.category} />
+                        </span>
                         <span>{rupee(i.price * i.qty)}</span>
                       </div>
                     ))}
@@ -824,6 +850,12 @@ export default function Admin() {
                   {o.status === "pending" && expandedOrders[o.id] && (() => {
                     const draft = orderDrafts[o.id] || [];
                     const editableMenu = menu.filter((item) => item.available && !item.isDraft);
+                    // Group swap choices by menu category (Fried, Frozen, Mains), keeping menu order within each.
+                    const knownCats = new Set(CATS.map((cat) => cat.id));
+                    const swapGroups = [
+                      ...CATS.map((cat) => ({ id: cat.id, name: cat.name, items: editableMenu.filter((item) => item.cat === cat.id) })),
+                      { id: "other", name: "Other", items: editableMenu.filter((item) => !knownCats.has(item.cat)) },
+                    ].filter((group) => group.items.length > 0);
                     const included = draft.filter((line) => line.included);
                     const editedTotal = included.reduce((sum, line) => sum + Number(line.qty) * Number(line.price), 0);
                     return (
@@ -854,7 +886,10 @@ export default function Admin() {
                               <div key={`${line.originalId}-${index}`} className={`rounded-lg border p-2.5 ${line.included ? "border-green-200 bg-white" : "border-stone-200 bg-stone-50 opacity-70"}`}>
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="min-w-0 flex-1">
-                                    <div className="truncate text-sm font-medium text-green-950">{line.name}</div>
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                      <span className="truncate text-sm font-medium text-green-950">{line.name}</span>
+                                      <SnackTypeBadge category={selected?.cat ?? line.category} />
+                                    </div>
                                     <div className="text-xs text-green-800/60">{rupee(Number(line.price))} each · {rupee(Number(line.price) * Number(line.qty))}</div>
                                   </div>
                                   <div className="flex items-center gap-1.5">
@@ -881,7 +916,11 @@ export default function Admin() {
                                     onChange={(event) => swapDraftItem(o.id, index, event.target.value)}
                                     className="mt-2 w-full rounded-lg border border-green-200 bg-white px-2.5 py-2 text-sm text-green-950 focus:outline-none focus:ring-2 focus:ring-amber-300"
                                   >
-                                    {editableMenu.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                                    {swapGroups.map((group) => (
+                                      <optgroup key={group.id} label={group.name}>
+                                        {group.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                                      </optgroup>
+                                    ))}
                                   </select>
                                 )}
                                 <div className="mt-2 flex items-center justify-between gap-3">
@@ -953,6 +992,18 @@ export default function Admin() {
                             <Check className="w-3.5 h-3.5" /> {expandedOrders[o.id] ? "Accept full order" : "Accept"}
                           </button>
                         </>
+                      )}
+                      {o.status === "accepted" && (
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Decline this accepted order because it was wrong?\n\n${o.customer.name} · ${o.id} · ${rupee(o.total)}\n\nAny fried/frozen stock deducted for it is put back. It is not counted in Sales.`)) {
+                              setOrderStatus(o.id, "declined");
+                            }
+                          }}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50"
+                        >
+                          <X className="w-3.5 h-3.5" /> Decline
+                        </button>
                       )}
                       {o.status === "accepted" && (
                         <button
@@ -1098,13 +1149,11 @@ export default function Admin() {
                           onClick={async () => {
                             if (
                               !confirm(
-                                `Permanently delete ${eligible.length} paid & synced invoice${eligible.length === 1 ? "" : "s"} from the database?\n\nThese are already recorded in your Google Sheet — this only frees up database storage, it doesn't touch the sheet.`
+                                `Permanently delete ${eligible.length} paid & synced invoice${eligible.length === 1 ? "" : "s"} from the database?\n\nThese are already recorded in your Google Sheet — this only frees up database storage, it doesn't touch the sheet. Sales totals are kept. Customers' invoice links for these orders will stop working.`
                               )
                             )
                               return;
-                            const deletedCount = await deletePaidSyncedOrdersApi();
-                            alert(`Deleted ${deletedCount} invoice${deletedCount === 1 ? "" : "s"}.`);
-                            refreshArchived();
+                            await deletePaidSynced();
                           }}
                           title="Permanently delete paid, already-synced invoices to free up database storage"
                           className="px-3.5 py-2 rounded-lg text-sm font-semibold border border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
@@ -1294,17 +1343,17 @@ export default function Admin() {
                           <div>
                             <h3 className="text-sm text-green-950">{item.name}</h3>
                             <div className="text-xs text-green-800/50">{item.unit}</div>
-                            {isDraft && <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Draft</span>}
+                            {isDraft && <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Unpublished</span>}
                           </div>
                           <button
                             onClick={() => toggleAvailability(item.id)}
                             disabled={isDraft && (!(Number(currentPrice) > 0) || available)}
-                            aria-label={isDraft ? "Enable item" : undefined}
+                            aria-label={`${available ? "Pause production for" : "Make production available"} ${item.name}`}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
                               available ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
                             } disabled:cursor-not-allowed disabled:opacity-40`}
                           >
-                            {isDraft ? "Enable item" : available ? "Production available" : "Production paused"}
+                            {available ? "Production available" : "Production paused"}
                           </button>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -1359,7 +1408,7 @@ export default function Admin() {
               </div>
             ))}
             <p className="text-xs text-green-800/50">
-              Stock is a manual production count shared by matching fried and frozen snacks. Orders do not reduce or restrict it. Prices remain separate for each item.
+              Stock is a production count shared by matching fried and frozen snacks. Accepting an order deducts its fried/frozen quantities (never below zero); declining an accepted order puts the deducted amount back. Prices remain separate for each item.
             </p>
           </div>
         )}
@@ -1383,20 +1432,16 @@ export default function Admin() {
             });
           });
 
-const periodRevenue = sold.reduce((s, o) => s + (o.total || 0), 0);
+          // Orders and revenue come from the permanent daily totals, so deleting
+          // old paid + synced orders never shrinks reported sales.
+          const summaryRows = summaryInRange(salesSummary, invRange, invRefDate);
+          const { orders: periodOrders, revenue: periodRevenue } = summaryTotals(summaryRows);
           const topItems = Object.entries(itemQty)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 10);
 
-          // Group sold orders by day or by week for the breakdown panel.
-          const groupSold = (o) => indiaRangeBounds(salesGroup, o.createdAt).start;
-          const byPeriod = new Map();
-          sold.forEach((o) => {
-            const key = groupSold(o);
-            if (!byPeriod.has(key)) byPeriod.set(key, []);
-            byPeriod.get(key).push(o);
-          });
-const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
+          // Group the daily totals by day or by week for the breakdown panel.
+          const periods = groupSummary(summaryRows, salesGroup);
           const periodLabel = (key) => (salesGroup === "day" ? fmtDate(key) : weekLabel(key));
 
           const statCard = (label, value, sub) => (
@@ -1448,11 +1493,14 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
               </section>
 
 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                    {statCard("Orders", sold.length)}
+                    {statCard("Orders", periodOrders)}
                     {statCard("Revenue", rupee(periodRevenue))}
                     {statCard("Paid", rupee(sold.filter((o) => o.paymentStatus === "paid").reduce((s, o) => s + (o.total || 0), 0)))}
                     {statCard("Unpaid", rupee(sold.filter((o) => o.paymentStatus !== "paid").reduce((s, o) => s + (o.total || 0), 0)))}
                   </div>
+                  <p className="-mt-4 mb-6 text-xs text-green-800/60">
+                    Orders and revenue are permanent daily totals. Paid, unpaid and items sold include only completed orders not yet deleted.
+                  </p>
 
                   <div className="bg-white border border-green-200 rounded-xl p-4 shadow-sm">
                     <h3 className="text-amber-600 text-sm uppercase tracking-widest mb-3">Items sold ({rangeLabel})</h3>
@@ -1473,13 +1521,12 @@ const periods = Array.from(byPeriod.entries()).sort((a, b) => b[0] - a[0]);
                     </h3>
                     {periods.length === 0 && <p className="text-green-800/50 text-sm">No completed orders in this range.</p>}
                     <div className="space-y-3">
-                      {periods.map(([key, list]) => {
-                        const periodRevenue = list.reduce((s, o) => s + (o.total || 0), 0);
+                      {periods.map(([key, totals]) => {
                         return (
                           <div key={key} className="border-b border-green-100 pb-2 last:border-0">
                             <div className="flex items-center justify-between text-sm">
 <span className="text-green-950">{periodLabel(key)}</span>
-<span className="text-green-800/70">{list.length} {list.length === 1 ? "order" : "orders"} · {rupee(periodRevenue)}</span>
+<span className="text-green-800/70">{totals.orders} {totals.orders === 1 ? "order" : "orders"} · {rupee(totals.revenue)}</span>
                             </div>
                           </div>
                         );

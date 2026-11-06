@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CATS, createItem, imageForItem, loadItems, resolveImg, retireItem, updateItem, uploadItemPhoto, reorderItems } from "../lib/kitchen.jsx";
+import { CATS, createItem, imageForItem, loadItems, resolveImg, retireItem, setItemPublished, updateItem, uploadItemPhoto, reorderItems } from "../lib/kitchen.jsx";
 import { itemGroups, moveMenuGroup, sectionOf } from '../lib/menuOrdering.js';
 import ReorderableItems from './ReorderableItems.jsx';
 
@@ -209,7 +209,22 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
       await refresh();
       await onChanged?.();
     } catch (error) {
-      if (!(await handleConflict(error))) setMessage(error.message || "Unable to retire item");
+      if (!(await handleConflict(error))) setMessage(error.message || "Unable to archive item");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const togglePublished = async (item) => {
+    if (pending) return;
+    setPending(true);
+    setMessage("");
+    try {
+      await setItemPublished(item.id, item.isDraft, item.revision);
+      await refresh();
+      await onChanged?.();
+    } catch (error) {
+      if (!(await handleConflict(error))) setMessage(error.message || "Unable to update publication status");
     } finally {
       setPending(false);
     }
@@ -220,7 +235,7 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl text-green-950 font-semibold" style={{ fontFamily: "var(--font-serif)" }}>Items</h2>
-          <p className="mt-1 text-sm text-green-800/65">Manage names, photos and ordering quantities. Set prices and availability in Inventory.</p>
+          <p className="mt-1 text-sm text-green-800/65">Manage items and publication. Published items are available for production; unpublished items are paused.</p>
         </div>
         <button type="button" disabled={pending} onClick={() => openEditor()} className="rounded-lg bg-amber-400 px-4 py-2 text-sm font-semibold text-green-950 hover:bg-amber-300">
           Add item
@@ -254,12 +269,12 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
                         <h3 className="font-semibold text-green-950">{item.name}</h3>
                         <p className="text-xs text-green-800/60">{categoryName} · {item.unit}</p>
                       </div>
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${item.isDraft ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700"}`}>{item.isDraft ? "Draft" : "Published"}</span>
+                      <button type="button" disabled={pending} aria-label={`${item.isDraft ? "Publish" : "Unpublish"} ${item.name}`} aria-pressed={!item.isDraft} onClick={() => togglePublished(item)} className={`rounded-full px-2 py-1 text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:opacity-50 ${item.isDraft ? "bg-amber-100 text-amber-800 hover:bg-amber-200" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"}`}>{item.isDraft ? "Unpublished" : "Published"}</button>
                     </div>
                     <p className="mt-2 text-xs text-green-800/60">Minimum {item.minQty} · increment {item.step}{item.isCombo ? " · Combo" : ""}</p>
                   </div>
                 </div>
-                {item.isDraft && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Set price and enable this item in Inventory.</p>}
+                {item.isDraft && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Set a positive price before publishing this item.</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" disabled={pending} aria-label={`Edit ${item.name}`} onClick={() => openEditor(item)} className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-semibold text-green-800">Edit</button>
                   <button type="button" disabled={pending} aria-label={`Delete ${item.name}`} onClick={() => setRetiring(item)} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600">Delete</button>
@@ -308,9 +323,9 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
         <div role="dialog" aria-modal="true" aria-labelledby="retire-title" className="fixed inset-0 z-50 flex items-center justify-center bg-green-950/45 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
             {message && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{message}</p>}
-            <h3 id="retire-title" className="text-lg font-semibold text-green-950">Retire {retiring.name}?</h3>
+            <h3 id="retire-title" className="text-lg font-semibold text-green-950">Archive {retiring.name}?</h3>
             <p className="mt-2 text-sm text-green-800/75">This removes the item from the active catalogue. Existing orders and their item names are preserved.</p>
-            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setRetiring(null)} className="rounded-lg border border-green-300 px-4 py-2 text-sm font-semibold text-green-800">Cancel</button><button type="button" onClick={confirmRetire} disabled={pending} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Retire item</button></div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setRetiring(null)} className="rounded-lg border border-green-300 px-4 py-2 text-sm font-semibold text-green-800">Cancel</button><button type="button" onClick={confirmRetire} disabled={pending} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Archive item</button></div>
           </div>
         </div>
       )}

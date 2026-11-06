@@ -73,6 +73,20 @@ async function retire(id, revision) {
     photoCache.delete(id);
   });
 }
+async function setPublished(id, published, revision) {
+  return transaction(async client => {
+    await locked(client, id, revision);
+    if (published) {
+      const { rows } = await client.query('SELECT selling_price FROM inventory WHERE menu_item_id=$1', [id]);
+      if (!(Number(rows[0]?.selling_price) > 0)) {
+        throw problem(400, 'Set a positive price before publishing this item.');
+      }
+    }
+    await client.query('UPDATE menu_items SET is_draft=$2, item_revision=gen_random_uuid() WHERE id=$1', [id, !published]);
+    await client.query('UPDATE inventory SET available=$2 WHERE menu_item_id=$1', [id, published]);
+    return get(client, id);
+  });
+}
 async function savePhoto(id, bytes, revision) {
   return transaction(async client => {
     await locked(client, id, revision);
@@ -124,4 +138,4 @@ async function reorder(section, entries) {
     return list(client);
   });
 }
-module.exports = { list, create, update, retire, savePhoto, photoMetadata, photo, problem, reorder };
+module.exports = { list, create, update, retire, setPublished, savePhoto, photoMetadata, photo, problem, reorder };

@@ -22,13 +22,15 @@ async function updateInventory(id, data) {
       FROM menu_items WHERE id = $1 AND NOT retired FOR UPDATE`, [id]);
     const item = found.rows[0];
     if (!item) { await client.query("ROLLBACK"); return null; }
-    if (item.is_draft && data.available === true) {
+    if (data.available === true) {
       const current = await client.query('SELECT selling_price FROM inventory WHERE menu_item_id=$1 FOR UPDATE', [id]);
       if (!(Number(data.price ?? current.rows[0]?.selling_price) > 0)) {
-        const error = new Error('Set a positive price before enabling this new item');
+        const error = new Error('Set a positive price before making this item production available');
         error.publicMessage = error.message; error.status = 400; throw error;
       }
-      await client.query('UPDATE menu_items SET is_draft=false, item_revision=gen_random_uuid() WHERE id=$1', [id]);
+    }
+    if (data.available !== undefined) {
+      await client.query('UPDATE menu_items SET is_draft=$2, item_revision=gen_random_uuid() WHERE id=$1', [id, !data.available]);
     }
     if (data.stock !== undefined && item.category_id !== "mains") {
       await client.query("UPDATE inventory SET stock = $1 WHERE menu_item_id = $2", [data.stock, item.stock_id]);

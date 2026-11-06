@@ -174,6 +174,9 @@ const updatePaymentStatus = async (req, res) => {
     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
     res.json({ success: true, data: order });
   } catch (err) {
+    if (err.code === "INVALID_STATUS_TRANSITION") {
+      return res.status(409).json({ success: false, code: err.code, message: err.message });
+    }
     console.error("❌ Failed to update payment status:", err.message);
     res.status(500).json({ success: false, message: "Failed to update payment status" });
   }
@@ -191,9 +194,9 @@ const deleteOrder = async (req, res) => {
 };
 
 // DELETE /api/orders/:id/completed
-// Permanently removes a single completed order. The order must be in
-// 'completed' status with stock_reserved = false; invoices, payments, and
-// the sales summary are intentionally left untouched.
+// Permanently removes a single completed order that was recorded by mistake.
+// Its amount is subtracted from the daily sales total, its invoice link stops
+// working, and stock is not restored.
 const deleteCompletedOrder = async (req, res) => {
   try {
     const result = await orderModel.deleteCompletedOrder(req.params.id);
