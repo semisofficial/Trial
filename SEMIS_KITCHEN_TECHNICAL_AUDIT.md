@@ -6,6 +6,30 @@ Audit date: 2026-11-06 · Branch: `codex/render-migration` @ `83a8dad` (+ staged
 
 ---
 
+## Repair log — 2026-11-18 (mobile, edited-order stock, repository audit; approved by owner)
+
+Nothing was committed, pushed, deployed or run against Neon. No migration is needed.
+
+| ID | Status | What changed | Verified by |
+|---|---|---|---|
+| M-01 iOS focus zoom | **Fixed (simulated only)** | Root cause: every text field, select and textarea used 14px text (`text-sm`); iOS Safari zooms into focused controls under 16px and stays zoomed. On touch screens (`pointer: coarse`) these controls are now 16px via an unlayered rule in `index.css` that overrides Tailwind utilities. Labels keep their size; pinch-zoom is still allowed. | Browser emulation: all checkout and Admin login fields compute to 16px. **Not verified on an iPhone.** |
+| M-02 Android bottom clipping | **Fixed (simulated only)** | Root causes: checkout modal `max-h-[90vh]` (Chrome's `vh` ignores the visible address bar), fixed overlays not shrinking for the keyboard, and the Admin drawer's `overflow: hidden` + large type cutting off Sign out on short screens. Now: viewport `interactive-widget=resizes-content`; overlays sized with `dvh`; dialogs capped to the overlay and scroll internally; page roots use `svh`; map height `clamp(10rem, 38dvh, 16rem)`; drawer is `dvh` tall, links scroll, smaller type under 560px height, Sign out always visible. `viewport-fit=cover` deliberately **not** enabled. | Emulation at 375×600, 320×568 and 740×360: dialogs within the viewport, Place order and Sign out reachable, no sideways overflow. **Not verified on Android devices.** |
+| S-01 Edited accept rejected for stock | **Fixed** | `acceptEditedOrder()` no longer rejects on `pendingShortages()`; it reuses `orderStock.deduct()` like the normal Accept and returns the shortage as a warning shown in Admin. | `admin-order-edit.test.js` cases A–E |
+| S-02 Swap onto an existing item mispriced | **Fixed** | Duplicate item lines are rejected (server) and hidden from the swap list (Admin). Swapping back to the original item restores its saved price in Admin. | `admin-order-edit.test.js` |
+| S-03 Generic delete of completed orders | **Fixed** | `DELETE /api/orders/:id` only deletes pending/declined orders with no stock held; others get 409. Not used by the UI. | `audit-2026-11.test.js`, `order-stock.test.js` |
+| S-04 Silent price change at checkout | **Fixed** | The cart sends the price it showed; a mismatch returns `409 PRICE_CHANGED`, nothing is saved, the cart reloads prices and the customer taps Place order again. Server price stays authoritative; requests without prices (old tabs) still work; saved-order retries still replay. Confirmation now shows the saved total. | `audit-2026-11.test.js`; browser emulation with mocked API |
+| S-05 Public stock exposure | **Fixed** | Public `/api/menu` and `/api/inventory` no longer include stock counts or stock-group ids; admin endpoints unchanged. | `audit-2026-11.test.js` |
+| S-06 Misleading UPI text | **Fixed** | Now says the QR is sent on WhatsApp after the order is confirmed (matches the manual process; WhatsApp API stays disabled). | review |
+| A-01 Accessibility | **Fixed** | Cart/checkout/confirmation are labelled dialogs with Escape, Tab containment, background scroll lock and focus return (`src/lib/dialog.js`); cart close shows × with a label; icon buttons labelled; larger tap areas; closed Admin drawer is `inert`/hidden and focus moves into it when opened. | lint/build; emulation |
+| D-01 Dependencies | **Partly fixed** | Non-forced `npm audit fix` updated the frontend lockfile (vite 8.3.8, plugin-react 6.3, eslint 10.15). Remaining: frontend 5 high (build-time vite/picomatch chain; npm's only "fix" is a vite downgrade); backend runtime moderate glob/minimatch via archiver (needs archiver 8, a major) and dev-only nodemon/chokidar. | `npm audit` |
+| — | **Open / owner decision** | Checkout retry key lost on page refresh (B5); "Delete paid & synced" breaks invoice links and the Sheet has no line items (B7); no `sales_summary` backfill for pre-existing data (B8); unpaginated order/archive loading (B9); `/invoice/*` rewrites to `api.semiskitchen.in` while `/api/*` uses `semiskitchenbe.onrender.com` (B10); no server-side delivery-area check and phone accepts any 10 digits (B12). | — |
+
+Results after repair (run 2026-11-18): backend `npm test` **102/102**; frontend `lint` clean, `test:checkout` 3/3, `test:cart` 2/2, `test:time` 2/2, `test:seo` (with production build) OK; secret guard 0 findings. Browser checks were desktop Chromium emulation with a mocked API, not physical devices. Still required on real phones: iPhone Safari and Chrome on iOS, Android Chrome and Samsung Internet (gesture and 3-button navigation), portrait and landscape, browser bars shown/hidden, keyboard open on every checkout and Admin field.
+
+Superseded by this log: the earlier rule in `RELEASE-pending-order-editing.md` that edited acceptance rejects insufficient stock, and the statement that application deletion restores an accepted order's stock.
+
+---
+
 ## Repair log — 2026-11-06 (approved by owner)
 
 Owner decisions:

@@ -53,7 +53,12 @@ test('accept deducts once, clamps to zero, and decline restores only actual dedu
   await orders.updateOrderStatus(order.id, 'pending');
   await orders.updateOrderStatus(order.id, 'accepted');
   assert.equal(await stock(), 0);
-  await orders.deleteOrder(order.id);
+  // Generic deletion refuses an accepted order; declining restores its stock.
+  assert.deepEqual(await orders.deleteOrder(order.id), { deleted: false, reason: 'stock_reserved' });
+  assert.equal(await stock(), 0);
+  await orders.updateOrderStatus(order.id, 'declined');
+  assert.equal(await stock(), 14);
+  assert.deepEqual(await orders.deleteOrder(order.id), { deleted: true });
   assert.equal(await stock(), 14);
 });
 test('completion keeps full ordered sales and cannot deduct or count revenue twice', async () => {
@@ -70,7 +75,9 @@ test('completion keeps full ordered sales and cannot deduct or count revenue twi
   const saved = (await orders.getOrders()).find(o => o.id === order.id);
   assert.equal(Number(saved.items[0].qty), 15);
   assert.equal(Number(saved.total), 300);
-  await orders.deleteOrder(order.id);
+  // A completed sale cannot be removed by the generic path (sales stay consistent).
+  assert.deepEqual(await orders.deleteOrder(order.id), { deleted: false, reason: 'completed' });
+  assert.equal(await revenue(), beforeRevenue + 300);
   assert.equal(await stock(), 0);
 });
 test('zero-stock acceptance and later decline never invent inventory', async () => {

@@ -4,9 +4,11 @@ exports.getInventory = async (req, res) => {
   try {
     const data = await inventory.getInventory();
 
+    // Public view: price and availability only. Stock counts and stock-group
+    // ids are served by the protected /api/inventory/admin endpoint.
     res.json({
       success: true,
-      data,
+      data: data.map(({ menu_item_id, selling_price, available }) => ({ menu_item_id, selling_price, available })),
     });
   } catch (err) {
     console.error(err);

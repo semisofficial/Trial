@@ -70,6 +70,7 @@ export default function Admin() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [dashboardError, setDashboardError] = useState("");
+  const [dashboardNotice, setDashboardNotice] = useState("");
   const [tab, setTab] = useState("pending");
   const [section, setSection] = useState("orders");
   const [primaryNavOpen, setPrimaryNavOpen] = useState(false);
@@ -136,6 +137,17 @@ export default function Admin() {
       window.removeEventListener("semis-api-error", showApiError);
     };
   }, []);
+
+  // Move focus into the drawer when it opens and back to its trigger when it
+  // closes, so keyboard and screen-reader users are not left behind it.
+  const navCloseRef = useRef(null);
+  const navTriggerRef = useRef(null);
+  const navWasOpen = useRef(false);
+  useEffect(() => {
+    if (primaryNavOpen) navCloseRef.current?.focus({ preventScroll: true });
+    else if (navWasOpen.current && navTriggerRef.current?.isConnected) navTriggerRef.current.focus({ preventScroll: true });
+    navWasOpen.current = primaryNavOpen;
+  }, [primaryNavOpen]);
 
   useEffect(() => {
     const closePrimaryNav = (event) => {
@@ -226,7 +238,8 @@ export default function Admin() {
     setOrderDrafts((current) => current[order.id] ? current : {
       ...current,
       [order.id]: order.items.map((item) => ({
-        originalId: item.id, id: item.id, name: item.name, qty: item.qty, price: item.price, category: item.category,
+        originalId: item.id, originalName: item.name, originalPrice: item.price,
+        id: item.id, name: item.name, qty: item.qty, price: item.price, category: item.category,
         included: true, swapOpen: false,
       })),
     });
@@ -254,7 +267,15 @@ export default function Admin() {
   const swapDraftItem = (orderId, index, itemId) => {
     const selected = menu.find((item) => item.id === itemId);
     if (!selected) return;
-    patchDraftLine(orderId, index, (line) => ({
+    // Swapping back to the line's original item restores its saved price, as
+    // the server does; any other item is charged at its current price.
+    patchDraftLine(orderId, index, (line) => (selected.id === line.originalId ? {
+      ...line,
+      id: selected.id,
+      name: line.originalName,
+      price: line.originalPrice,
+      swapOpen: false,
+    } : {
       ...line,
       id: selected.id,
       name: selected.name,
@@ -284,9 +305,15 @@ export default function Admin() {
       return;
     }
     setDashboardError("");
+    setDashboardNotice("");
     setEditedAcceptPending((current) => ({ ...current, [order.id]: true }));
     try {
-      await acceptEditedOrderApi(order.id, items);
+      const accepted = await acceptEditedOrderApi(order.id, items);
+      const shortages = accepted?.stock_shortages || [];
+      if (shortages.length) {
+        setDashboardNotice(`Order ${order.id} accepted. Still to prepare: ${shortages
+          .map((s) => `${s.name} (short ${Number(s.shortage)})`).join(", ")}. Only stock on hand was deducted.`);
+      }
       setExpandedOrders((current) => ({ ...current, [order.id]: false }));
       setOrderDrafts((current) => { const next = { ...current }; delete next[order.id]; return next; });
       await Promise.allSettled([refreshOrders(), refreshInventory(), refreshBatchInfo()]);
@@ -427,12 +454,12 @@ export default function Admin() {
   };
 
   if (authChecking) {
-    return <div className="min-h-screen bg-green-100 flex items-center justify-center text-green-800">Checking staff session...</div>;
+    return <div className="sk-page-min bg-green-100 flex items-center justify-center text-green-800">Checking staff session...</div>;
   }
 
   if (!unlocked) {
     return (
-      <div className="min-h-screen bg-green-100 flex items-center justify-center p-4" style={{ fontFamily: "var(--font-sans)" }}>
+      <div className="sk-page-min bg-green-100 flex items-center justify-center p-4" style={{ fontFamily: "var(--font-sans)" }}>
         <style>{FONTS}</style>
         <div className="w-full max-w-xs text-center">
           <div className="w-12 h-12 rounded-full bg-amber-400 flex items-center justify-center mx-auto mb-4">
@@ -620,12 +647,13 @@ export default function Admin() {
   };
 
   return (
-    <div className="admin-dashboard-shell min-h-screen bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="admin-dashboard-shell bg-green-100 text-green-950" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{FONTS}</style>
 
       <aside
         className={`admin-primary-nav ${primaryNavOpen ? "is-open" : ""}`}
         aria-label="Admin sections"
+        inert={!primaryNavOpen}
       >
         <div className="admin-primary-nav__panel">
           <div className="admin-primary-nav__heading">
@@ -634,6 +662,7 @@ export default function Admin() {
               <p className="admin-primary-nav__where">Where to?</p>
             </div>
             <button
+              ref={navCloseRef}
               type="button"
               className="admin-primary-nav__close"
               onClick={() => setPrimaryNavOpen(false)}
@@ -676,11 +705,12 @@ export default function Admin() {
         tabIndex={primaryNavOpen ? 0 : -1}
       />
 
-      <div className="admin-dashboard-content min-h-screen flex flex-col">
+      <div className="admin-dashboard-content sk-page-min flex flex-col">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-green-200 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
+              ref={navTriggerRef}
               type="button"
               className="admin-primary-nav__trigger"
               onClick={() => setPrimaryNavOpen(true)}
@@ -713,6 +743,12 @@ export default function Admin() {
           <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <span>{dashboardError}</span>
             <button onClick={() => setDashboardError("")} className="font-semibold" aria-label="Dismiss error">×</button>
+          </div>
+        )}
+        {dashboardNotice && (
+          <div role="status" className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span>{dashboardNotice}</span>
+            <button onClick={() => setDashboardNotice("")} className="font-semibold" aria-label="Dismiss notice">×</button>
           </div>
         )}
         {section === "orders" && (
@@ -880,6 +916,12 @@ export default function Admin() {
                         <div className="space-y-2">
                           {draft.map((line, index) => {
                             const selected = menu.find((item) => item.id === line.id);
+                            // One line per item: a swap target already used by another line is hidden
+                            // (change that line's quantity instead), so each line keeps its own price.
+                            const usedElsewhere = new Set(draft.filter((_, other) => other !== index).map((other) => other.id));
+                            const lineSwapGroups = swapGroups
+                              .map((group) => ({ ...group, items: group.items.filter((item) => !usedElsewhere.has(item.id)) }))
+                              .filter((group) => group.items.length > 0);
                             const step = Number(selected?.step) || 1;
                             const minQty = Number(selected?.minQty) || 1;
                             return (
@@ -916,7 +958,7 @@ export default function Admin() {
                                     onChange={(event) => swapDraftItem(o.id, index, event.target.value)}
                                     className="mt-2 w-full rounded-lg border border-green-200 bg-white px-2.5 py-2 text-sm text-green-950 focus:outline-none focus:ring-2 focus:ring-amber-300"
                                   >
-                                    {swapGroups.map((group) => (
+                                    {lineSwapGroups.map((group) => (
                                       <optgroup key={group.id} label={group.name}>
                                         {group.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                                       </optgroup>
@@ -937,7 +979,7 @@ export default function Admin() {
                           })}
                         </div>
                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-green-200 pt-3">
-                          <p className="max-w-md text-xs text-green-800/60">This action saves the included lines and accepts them atomically. If stock changed meanwhile, nothing is changed and you can adjust again.</p>
+                          <p className="max-w-md text-xs text-green-800/60">This saves the included lines, recalculates the total and accepts them in one step. Like Accept, it deducts only the fried/frozen stock on hand (never below zero); any shortage stays a production reminder. Omitted lines are not deducted.</p>
                           <button
                             type="button"
                             onClick={() => handleAcceptEditedOrder(o)}
@@ -1134,7 +1176,7 @@ export default function Admin() {
                           alert(err.message || "Sync to Google Sheets failed.");
                         }
                       }}
-                      title="Push accepted orders' line items to the configured Google Sheet"
+                      title="Add one row per completed, paid order (totals only, no line items) to the Google Sheet"
                       className="px-3.5 py-2 rounded-lg text-sm font-semibold border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                     >
                       <Share2 className="w-3.5 h-3.5 inline -mt-0.5 mr-1" /> Sync to Sheets

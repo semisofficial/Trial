@@ -84,11 +84,13 @@ const createOrder = async (req, res) => {
     res.status(replayed ? 200 : 201).json({ success: true, data });
   } catch (err) {
     console.error("❌ Failed to create order:", err.message);
-    const status = ["INSUFFICIENT_STOCK", "IDEMPOTENCY_CONFLICT"].includes(err.code) ? 409 : err.code === "INVALID_ORDER" ? 400 : 500;
+    const status = ["INSUFFICIENT_STOCK", "IDEMPOTENCY_CONFLICT", "PRICE_CHANGED"].includes(err.code) ? 409
+      : err.code === "INVALID_ORDER" ? 400 : 500;
     res.status(status).json({
       success: false,
       code: err.code || "ORDER_CREATION_FAILED",
       message: status === 500 ? "Failed to create order" : err.message,
+      ...(err.code === "PRICE_CHANGED" ? { priceChanges: err.priceChanges } : {}),
     });
   }
 };
@@ -184,8 +186,14 @@ const updatePaymentStatus = async (req, res) => {
 
 const deleteOrder = async (req, res) => {
   try {
-    const deleted = await orderModel.deleteOrder(req.params.id);
-    if (!deleted) return res.status(404).json({ success: false, message: "Order not found" });
+    const result = await orderModel.deleteOrder(req.params.id);
+    if (!result.deleted) {
+      if (result.reason === "not_found") return res.status(404).json({ success: false, message: "Order not found" });
+      const message = result.reason === "completed"
+        ? "Completed orders are sales. Use the completed-order delete action instead."
+        : "Accepted orders hold stock. Decline the order first, then delete it.";
+      return res.status(409).json({ success: false, code: "ORDER_NOT_DELETABLE", message });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Failed to delete order:", err.message);

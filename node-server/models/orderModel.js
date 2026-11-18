@@ -222,10 +222,31 @@ async function insertOrder(client, { customer, items, orderMode, notes, keyHash,
   return { ...publicOrderRow(orderResult.rows[0]), customer, items, replayed: false };
 }
 
+// Optional unit prices the customer was shown. They are never used for
+// charging; a mismatch only stops the order so the customer can confirm.
+// Requests from older pages without prices skip this check.
+function expectedPrices(items) {
+  const expected = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.price == null) continue;
+    const price = Number(item.price);
+    if (!Number.isFinite(price) || price < 0) throw orderError("One or more cart prices are invalid");
+    expected.set(String(item.id || "").trim(), price);
+  }
+  return expected;
+}
+
+function priceChanges(authoritativeItems, expected) {
+  return authoritativeItems
+    .filter((item) => expected.has(item.id) && Math.abs(expected.get(item.id) - item.price) > 0.005)
+    .map((item) => ({ id: item.id, name: item.name, price: item.price, previousPrice: expected.get(item.id) }));
+}
+
 async function createOrder({ customer, items, orderMode, notes, offerSlug, idempotencyKey }) {
   const cleanCustomer = normalizeCustomer(customer && { ...customer, notes: customer.notes || notes });
   if (!["Delivery", "Pickup"].includes(orderMode)) throw orderError("Invalid order mode");
   const requestedItems = normalizeRequestedItems(items);
+  const expected = expectedPrices(items);
   // The public HTTP endpoint requires this key. Optional only for internal callers.
   if (idempotencyKey != null && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
     throw orderError("Invalid checkout identifier");
@@ -265,6 +286,12 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
     // A retry of an already-saved order must succeed even after its delivery slot ends.
     validateDeliveryDetails(cleanCustomer, orderMode);
     const authoritativeItems = await priceItems(client, requestedItems);
+    const changed = priceChanges(authoritativeItems, expected);
+    if (changed.length) {
+      const error = orderError("Some prices changed since you added these items. Please check the updated total and place your order again.", "PRICE_CHANGED");
+      error.priceChanges = changed;
+      throw error;
+    }
     validateMainsTiming(authoritativeItems, cleanCustomer, orderMode);
     const order = await insertOrder(client, {
       customer: cleanCustomer,
@@ -285,6 +312,15 @@ async function createOrder({ customer, items, orderMode, notes, offerSlug, idemp
 
 
 async function priceEditedItems(client, orderId, requestedItems) {
+  // Each edited line keeps its own price rule (original line: saved price;
+  // swapped line: current price). Merging two lines of one item would apply a
+  // single price to both, so the editor must change the existing line instead.
+  if (Array.isArray(requestedItems)) {
+    const ids = requestedItems.map((item) => String(item?.id || "").trim());
+    if (new Set(ids).size !== ids.length) {
+      throw orderError("An item can appear only once. Change the quantity of the existing line instead of swapping another line to the same item.");
+    }
+  }
   const normalized = normalizeRequestedItems(requestedItems);
   const originalRows = (await client.query(
     `SELECT oi.menu_item_id AS id, oi.quantity, oi.unit_price, oi.item_name_snapshot
@@ -360,13 +396,11 @@ async function acceptEditedOrder(id, requestedItems) {
     validateMainsTiming(items, { deliveryDate: String(previous.delivery_date || "").slice(0, 10) }, previous.order_mode);
     const total = await replaceOrderItems(client, id, items);
 
-    // Edited acceptance is specifically the safe partial-order path: every
-    // included fried/frozen quantity must still be on hand at commit time.
-    // The normal Accept action keeps its historical behavior for full orders.
+    // Same stock policy as the normal Accept: a shortage is a production
+    // reminder, not a rejection. deduct() takes only what is on hand, never
+    // goes below zero and records the actual amount for a later decline.
+    // Shortages are measured before deduction and returned as a warning.
     const shortages = await orderStock.pendingShortages(client, [id]);
-    if (shortages.length) {
-      throw orderError("One or more included items exceed current stock. Reduce the quantity or omit them and try again.", "INSUFFICIENT_STOCK");
-    }
     const reserved = await orderStock.deduct(client, id);
     const updated = (await client.query(
       `UPDATE orders o SET status='accepted', stock_reserved=$1, total=$2 WHERE o.id=$3
@@ -375,7 +409,11 @@ async function acceptEditedOrder(id, requestedItems) {
       [reserved, total, id]
     )).rows[0];
     await client.query("COMMIT");
-    return { ...publicOrderRow(updated), previousStatus: previous.status };
+    return {
+      ...publicOrderRow(updated),
+      previousStatus: previous.status,
+      stock_shortages: shortages.map(({ order_id: _orderId, ...shortage }) => shortage),
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -483,17 +521,27 @@ async function deleteUnreferencedCustomers(client, customerIds) {
   );
 }
 
+// Generic deletion is limited to orders that never became a sale and hold no
+// stock: pending or declined. Accepted orders must be declined first (which
+// restores their recorded stock); completed orders use deleteCompletedOrder
+// (wrong order, subtracts sales) or deletePaidSyncedOrders (keeps totals).
+const GENERIC_DELETE_STATUSES = new Set(["pending", "declined"]);
+
 async function deleteOrder(id) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const found = await client.query(`SELECT stock_reserved, customer_id FROM orders WHERE id=$1 FOR UPDATE`, [id]);
-    if (!found.rows[0]) { await client.query("ROLLBACK"); return false; }
-    if (found.rows[0].stock_reserved) await restoreOrderStock(client, id);
+    const found = await client.query(`SELECT status, stock_reserved, customer_id FROM orders WHERE id=$1 FOR UPDATE`, [id]);
+    const row = found.rows[0];
+    if (!row) { await client.query("ROLLBACK"); return { deleted: false, reason: "not_found" }; }
+    if (!GENERIC_DELETE_STATUSES.has(row.status) || row.stock_reserved) {
+      await client.query("ROLLBACK");
+      return { deleted: false, reason: row.stock_reserved ? "stock_reserved" : row.status };
+    }
     await client.query(`DELETE FROM orders WHERE id=$1`, [id]);
-    await deleteUnreferencedCustomers(client, [found.rows[0].customer_id]);
+    await deleteUnreferencedCustomers(client, [row.customer_id]);
     await client.query("COMMIT");
-    return true;
+    return { deleted: true };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

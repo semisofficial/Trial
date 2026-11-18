@@ -177,7 +177,7 @@ export default function LocationPicker({ value, onChange, initial = DEFAULT_CENT
         </button>
       </div>
 
-      <div ref={mapElRef} className="w-full h-64 md:h-72" />
+      <div ref={mapElRef} className="sk-map w-full" />
 
       <div className="px-3.5 py-3 space-y-1.5">
         <label className="text-xs text-[#6F6657]">Delivery address (auto-filled from pin)</label>

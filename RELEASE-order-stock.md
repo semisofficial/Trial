@@ -11,7 +11,9 @@
 
 - Pending orders never reserve stock. Each warning compares that order's combined fried/frozen requirement to the current shared inventory. It does not allocate stock among other pending orders. Refresh the dashboard after another admin's changes.
 - Acceptance locks the order and shared inventory rows, deducting up to the available quantity. Stock never goes negative. Mains are excluded. Pending shortages update after local stock saves and status changes.
-- Repeated acceptance requests do not deduct again. A decline or application deletion of a reserved accepted order restores only its recorded deduction. Reopening and accepting a declined order calculates a fresh deduction.
+- Repeated acceptance requests do not deduct again. A decline of a reserved accepted order restores only its recorded deduction. Reopening and accepting a declined order calculates a fresh deduction.
+- `Accept included items` (edited acceptance) uses the same rule as the normal Accept: it deducts up to the available stock for the included lines only and reports any shortage as a warning instead of rejecting.
+- Since 2026-11-18 the generic `DELETE /api/orders/:id` deletes only pending or declined orders with no stock held. Accepted orders must be declined first (restoring their recorded stock); completed orders use the dedicated completed-order delete or the paid-and-synced clean-up.
 - Completion retains the full quantity, line prices, invoice total and normal completed-only Sales behavior. No second deduction occurs. Deleting a completed order never restores consumed stock.
 - Previously accepted orders are not back-deducted on deployment or completion. Pre-existing legacy reservations retain their original restoration behavior.
 - The shortage is a production reminder, not an extra charge. Preparing 5 missing items for an accepted order of 15 does not add another 5 to the invoice or Sales.
@@ -19,7 +21,7 @@
 
 ## Deletion and recovery
 
-Do not use raw SQL DELETE for an accepted order with stock_reserved=true: it bypasses application restoration. Deleting an order cascades its ledger rows. Keep normal database backups. The ledger is small (one row per snack stock group per accepted order), and QR/payment/customer checkout behavior is unchanged.
+Do not use raw SQL DELETE for an accepted order with stock_reserved=true: it bypasses application restoration. The application's generic delete refuses such orders; decline them first. Deleting an order cascades its ledger rows. Keep normal database backups. The ledger is small (one row per snack stock group per accepted order), and QR/payment/customer checkout behavior is unchanged.
 
 ## Verification scope
 
