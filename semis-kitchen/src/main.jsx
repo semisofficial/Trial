@@ -25,7 +25,7 @@ createRoot(document.getElementById("root")).render(
         <Route
           path="/nashi"
           element={(
-            <Suspense fallback={<div className="min-h-screen bg-green-950" aria-label="Loading admin dashboard" />}>
+            <Suspense fallback={<div className="sk-page-min bg-green-950" aria-label="Loading admin dashboard" />}>
               <Admin />
             </Suspense>
           )}

@@ -18,6 +18,7 @@ import {
 import { applyDeliveryDateInput, deliveryDateIsUnavailable, mainsSundayBlocked } from "./lib/deliveryDate.js";
 import { floatingCartPlacement } from "./lib/floatingCart.js";
 import { checkoutAttempt } from "./lib/checkoutAttempt.js";
+import { useModal } from "./lib/dialog.js";
 
 const LocationPicker = lazy(() => import("./components/LocationPicker.jsx"));
 
@@ -104,6 +105,12 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
   const [footerVisible, setFooterVisible] = useState(false);
   const [footerHeight, setFooterHeight] = useState(0);
   const footerRef = useRef(null);
+  const cartPanelRef = useRef(null);
+  const checkoutPanelRef = useRef(null);
+  const confirmPanelRef = useRef(null);
+  useModal(cartOpen, cartPanelRef, () => setCartOpen(false));
+  useModal(checkoutOpen, checkoutPanelRef, () => setCheckoutOpen(false));
+  useModal(Boolean(confirmedOrder), confirmPanelRef, () => setConfirmedOrder(null));
 
   useEffect(() => {
     const footer = footerRef.current;
@@ -217,7 +224,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
   const selectedSlotIsAvailable = availableDeliverySlots.some((slot) => slot.id === form.deliverySlot);
   const sundayBlocked = mainsSundayBlocked(cartLines, form.deliveryDate, form.mode);
   const checkoutOrder = {
-    items: cartLines.map((l) => ({ id: l.id, qty: l.qty })),
+    // The shown price lets the server refuse (not reprice) the order if a
+    // price changed meanwhile. The server still calculates every charge.
+    items: cartLines.map((l) => ({ id: l.id, qty: l.qty, price: l.price })),
     customer: {
       name: form.name.trim(), phone: form.phone.trim(), address: form.address.trim(),
       notes: form.notes.trim(), mode: form.mode, location: form.location || null,
@@ -281,10 +290,17 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     } catch (err) {
       // These responses definitively rejected this attempt before saving it.
       // Network/server uncertainty must retain the original key and payload.
-      if ([400, 429].includes(err.status)) setPendingAttempt(null);
+      if ([400, 429].includes(err.status) || err.code === "PRICE_CHANGED") setPendingAttempt(null);
       console.error("Failed to place order:", err);
       setSubmitting(false);
       submittingRef.current = false;
+      if (err.code === "PRICE_CHANGED") {
+        // Nothing was saved. Load current prices so the cart shows the new
+        // total; the customer confirms by tapping Place order again.
+        onRetryMenu();
+        setErrorMsg("Some prices changed since you added these items. Please check the updated order total, then tap Place order again to confirm.");
+        return;
+      }
       setErrorMsg([400, 409, 429, 503].includes(err.status)
         ? err.message
         : "Sorry, we couldn't place your order. Please check your details or connection and try again.");
@@ -319,7 +335,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
     || item.id === chattipathiriOptions[0]?.id);
 
   return (
-    <div className="customer-editorial relative min-h-screen bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="customer-editorial sk-page-min relative bg-[#F6EDD7] text-[#3F3B24]" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{`${FONTS}\n@keyframes heroCrossfade { from { opacity: 0; } to { opacity: 1; } }\n@media (prefers-reduced-motion: reduce) { .hero-slide-enter { animation: none !important; } }`}</style>
 
       {/* Hero */}
@@ -492,11 +508,11 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                   {liveReady ? (
                     qty > 0 ? (
                       <div className="flex items-center gap-2 bg-green-950 rounded-lg border border-green-800 px-1 py-1 shrink-0">
-                        <button onClick={() => decItem(item.id, item)} className="w-7 h-7 flex items-center justify-center text-stone-300 hover:text-amber-300">
+                        <button type="button" aria-label={`Remove one ${item.name}`} onClick={() => decItem(item.id, item)} className="sk-hit relative w-7 h-7 flex items-center justify-center text-stone-300 hover:text-amber-300">
                           <Minus className="w-3.5 h-3.5" />
                         </button>
                         <span className="w-5 text-center text-sm font-semibold">{qty}</span>
-                        <button onClick={() => addItem(item)} className="w-7 h-7 flex items-center justify-center text-stone-300 hover:text-amber-300">
+                        <button type="button" aria-label={`Add one ${item.name}`} onClick={() => addItem(item)} className="sk-hit relative w-7 h-7 flex items-center justify-center text-stone-300 hover:text-amber-300">
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -547,14 +563,15 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
 
       {/* Cart drawer */}
       {cartOpen && (
-        <div className="fixed inset-0 z-40 flex justify-end">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setCartOpen(false)} />
-          <div className="relative w-full sm:w-[420px] bg-green-950 border-l border-green-900 h-full flex flex-col">
+        <div className="sk-overlay fixed inset-0 z-40 flex justify-end">
+          <div className="absolute inset-0 bg-black/60" aria-hidden="true" onClick={() => setCartOpen(false)} />
+          <div ref={cartPanelRef} role="dialog" aria-modal="true" aria-labelledby="cart-title" tabIndex={-1}
+            className="relative w-full sm:w-[420px] bg-green-950 border-l border-green-900 h-full flex flex-col focus:outline-none">
             <div className="flex items-center justify-between px-5 py-4 border-b border-green-900">
-              <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Your order</h2>
-              <button onClick={() => setCartOpen(false)}><Plus className="w-5 h-5 text-stone-400" /></button>
+              <h2 id="cart-title" className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Your order</h2>
+              <button type="button" aria-label="Close cart" onClick={() => setCartOpen(false)} className="sk-hit relative"><X className="w-5 h-5 text-stone-400" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-4 space-y-3">
               {unavailableCartNotice}
               {cartLines.length === 0 && <p className="text-stone-500 text-sm">Your cart is empty.</p>}
               {cartLines.map((l) => (
@@ -565,9 +582,9 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                       <div className="text-stone-500 text-xs">{rupee(l.price)} {l.unit}</div>
                     </div>
                     <div className="flex items-center gap-2 bg-green-900 rounded-lg border border-green-800 px-1 py-1">
-                      <button onClick={() => decItem(l.id, l)} className="w-6 h-6 flex items-center justify-center text-stone-300"><Minus className="w-3 h-3" /></button>
+                      <button type="button" aria-label={`Remove one ${l.name}`} onClick={() => decItem(l.id, l)} className="sk-hit relative w-6 h-6 flex items-center justify-center text-stone-300"><Minus className="w-3 h-3" /></button>
                       <span className="w-8 text-center text-sm">{l.qty}</span>
-                      <button onClick={() => addItem(l)} className="w-6 h-6 flex items-center justify-center text-stone-300"><Plus className="w-3 h-3" /></button>
+                      <button type="button" aria-label={`Add one ${l.name}`} onClick={() => addItem(l)} className="sk-hit relative w-6 h-6 flex items-center justify-center text-stone-300"><Plus className="w-3 h-3" /></button>
                     </div>
                   </div>
                   <div className="text-right text-sm text-amber-400 font-semibold">{rupee(l.qty * l.price)}</div>
@@ -575,7 +592,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
               ))}
             </div>
             {cartLines.length > 0 && (
-              <div className="border-t border-green-900 p-5 space-y-3">
+              <div className="sk-safe-bottom border-t border-green-900 p-5 space-y-3">
                 <div className="flex justify-between text-stone-200 font-semibold">
                   <span>Total</span>
                   <span className="text-amber-400">{rupee(cartTotal)}</span>
@@ -599,12 +616,13 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
 
       {/* Checkout modal */}
       {checkoutOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setCheckoutOpen(false)} />
-          <div className="relative bg-green-950 border border-green-900 rounded-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <div className="sk-overlay fixed inset-0 z-40 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" aria-hidden="true" onClick={() => setCheckoutOpen(false)} />
+          <div ref={checkoutPanelRef} role="dialog" aria-modal="true" aria-labelledby="checkout-title" tabIndex={-1}
+            className="sk-dialog relative bg-green-950 border border-green-900 rounded-2xl w-full max-w-md p-6 overflow-y-auto overscroll-contain focus:outline-none">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Delivery details</h2>
-              <button onClick={() => setCheckoutOpen(false)}><X className="w-5 h-5 text-stone-400" /></button>
+              <h2 id="checkout-title" className="text-lg font-semibold text-stone-50" style={{ fontFamily: "var(--font-serif)" }}>Delivery details</h2>
+              <button type="button" aria-label="Close delivery details" onClick={() => setCheckoutOpen(false)} className="sk-hit relative"><X className="w-5 h-5 text-stone-400" /></button>
             </div>
             <div className="flex gap-2 mb-4">
               {["Delivery", "Pickup"].map((m) => (
@@ -644,7 +662,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
               </div>
               {form.paymentMethod === "upi" && (
                 <p className="mt-2 text-sm text-amber-300/90 bg-amber-400/10 border border-amber-400/30 rounded-lg px-3 py-2">
-                  A QR code will be sent to your provided phone number to complete the payment.
+                  After we confirm your order, we'll send you the UPI payment QR on WhatsApp.
                 </p>
               )}
             </div>
@@ -677,7 +695,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                 <div className={checkoutErrors.location ? "rounded-xl ring-2 ring-red-400" : ""}>
                 <Suspense
                   fallback={(
-                    <div className="h-80 rounded-xl border border-green-800 bg-green-900/40 flex items-center justify-center text-sm text-stone-400">
+                    <div className="sk-map-fallback rounded-xl border border-green-800 bg-green-900/40 flex items-center justify-center text-sm text-stone-400">
                       Loading delivery map…
                     </div>
                   )}
@@ -723,7 +741,7 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
                     className={`block w-full max-w-full bg-green-900/60 border rounded-lg px-3.5 py-2.5 text-sm text-stone-100 focus:outline-none focus:ring-2 [color-scheme:dark] ${checkoutErrors.deliveryDate ? "border-red-400 ring-2 ring-red-400/40" : "border-green-800 focus:ring-amber-400"}`}
                   />
                   {IS_IOS && !form.deliveryDate && (
-                    <span className="absolute inset-y-0 left-3.5 flex items-center text-sm text-stone-500 pointer-events-none">
+                    <span className="sk-ios-date-placeholder absolute inset-y-0 left-3.5 flex items-center text-sm text-stone-500 pointer-events-none">
                       Select a date
                     </span>
                   )}
@@ -816,13 +834,14 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
 
       {/* Confirmation */}
       {confirmedOrder && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70" />
-          <div className="relative bg-green-950 border border-green-900 rounded-2xl w-full max-w-sm p-6 text-center">
+        <div className="sk-overlay fixed inset-0 z-40 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70" aria-hidden="true" />
+          <div ref={confirmPanelRef} role="dialog" aria-modal="true" aria-labelledby="confirmation-title" tabIndex={-1}
+            className="sk-dialog relative bg-green-950 border border-green-900 rounded-2xl w-full max-w-sm p-6 text-center overflow-y-auto overscroll-contain focus:outline-none">
             <div className="w-14 h-14 rounded-full bg-amber-400 flex items-center justify-center mx-auto mb-4">
               <Check className="w-7 h-7 text-green-950" />
             </div>
-            <h2 className="text-xl font-semibold text-stone-50 mb-1" style={{ fontFamily: "var(--font-serif)" }}>Order sent!</h2>
+            <h2 id="confirmation-title" className="text-xl font-semibold text-stone-50 mb-1" style={{ fontFamily: "var(--font-serif)" }}>Order sent!</h2>
             <p className="text-stone-400 text-sm mb-4">We'll confirm on WhatsApp/call shortly. Keep these IDs for your reference.</p>
             <div className="bg-green-900/60 border border-green-800 rounded-lg py-2.5 text-amber-300 font-mono tracking-wider text-sm mb-2">
               {confirmedOrder.id}
@@ -830,6 +849,11 @@ export function CustomerApp({ menu, inventory, menuState, liveReady, onRetryMenu
             <div className="bg-green-900/60 border border-green-800 rounded-lg py-2.5 text-amber-300 font-mono tracking-wider text-sm mb-5">
               {confirmedOrder.invoiceId}
             </div>
+            {Number.isFinite(confirmedOrder.total) && (
+              <p className="-mt-3 mb-5 text-sm text-stone-300">
+                Order total: <span className="font-semibold text-amber-400">{rupee(confirmedOrder.total)}</span>
+              </p>
+            )}
             <button
               onClick={() => setConfirmedOrder(null)}
               className="w-full py-3 rounded-lg bg-amber-400 text-green-950 font-semibold hover:bg-amber-300 transition-colors"

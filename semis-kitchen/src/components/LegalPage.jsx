@@ -15,7 +15,7 @@ export default function LegalPage({ title, description, canonicalPath, sections 
   }, [title, description, canonicalPath]);
 
   return (
-    <main className="min-h-screen bg-[#F6EDD7] px-5 py-10 text-[#3F3B24] sm:py-16">
+    <main className="sk-page-min bg-[#F6EDD7] px-5 py-10 text-[#3F3B24] sm:py-16">
       <article className="mx-auto max-w-3xl rounded-3xl border border-[#E8D7B5] bg-[#FFF8E8] p-6 shadow-sm sm:p-10">
         <a href="/" className="mb-8 inline-flex items-center gap-2 text-sm font-semibold text-[#6F6F32] hover:underline">
           <ArrowLeft aria-hidden="true" className="h-4 w-4" />

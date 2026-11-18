@@ -119,7 +119,8 @@ function mapMenuItems(data) {
     minQty: Number(item.minQty),
     step: Number(item.step),
     price: Number(item.price),
-    stock: Number(item.stock),
+    // Only the protected admin menu includes stock; the public menu omits it.
+    stock: item.stock == null ? null : Number(item.stock),
     available: item.available !== false,
     seasonal: item.seasonal,
     isDraft: item.isDraft === true,
@@ -482,9 +483,10 @@ export async function deleteOrderApi(id) {
   await parseApiResponse(res, "Unable to delete order");
 }
 
-/* Permanently removes a single order from the Completed tab.
-   The backend enforces status = 'completed' AND stock_reserved = false.
-   Invoice data, payment records, and the sales summary are not affected. */
+/* Permanently removes a single completed order that was recorded by mistake.
+   The backend enforces status = 'completed' AND stock_reserved = false,
+   subtracts the order from that IST day's sales total, deletes its payment
+   record and invoice link, and leaves stock unchanged. */
 export async function deleteCompletedOrderApi(id) {
   const res = await adminRequest(`/orders/${encodeURIComponent(id)}/completed`, { method: "DELETE" });
   await parseApiResponse(res, "Unable to delete completed order");
@@ -609,8 +611,9 @@ export async function downloadInvoiceBatch(page) {
   window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
 
-/* Push all accepted orders' line items into the configured Google Sheet.
-   Returns { success, appended } or throws on failure. */
+/* Append one row per completed, paid, not-yet-synced order (invoice id,
+   order id, date, name, phone, total, payment method) to the Google Sheet.
+   Line items are not sent. Returns { success, appended } or throws. */
 export async function syncToSheets() {
   const res = await adminRequest("/invoices/sync-sheet", { method: "POST" });
   const json = await parseApiResponse(res, "Sync to Google Sheets failed");

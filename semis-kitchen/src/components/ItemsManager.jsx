@@ -288,8 +288,8 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
       {!loading && visible.length===0 && <p className="py-8 text-center text-sm text-green-800/60">No items match this search.</p>}
 
       {editing && (
-        <div role="dialog" aria-modal="true" aria-labelledby="item-editor-title" className="fixed inset-0 z-50 flex items-center justify-center bg-green-950/45 p-4">
-          <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-labelledby="item-editor-title" className="sk-overlay fixed inset-0 z-50 flex items-center justify-center bg-green-950/45 p-4">
+          <div className="sk-dialog w-full max-w-xl overflow-y-auto overscroll-contain rounded-2xl bg-white p-5 shadow-xl">
             {message && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{message}</p>}
             <div className="flex items-center justify-between gap-3">
               <h3 id="item-editor-title" className="text-xl font-semibold text-green-950">{editing.id ? "Edit item" : "Add item"}</h3>
@@ -320,8 +320,8 @@ export default function ItemsManager({ onChanged, onGoToInventory }) {
       )}
 
       {retiring && (
-        <div role="dialog" aria-modal="true" aria-labelledby="retire-title" className="fixed inset-0 z-50 flex items-center justify-center bg-green-950/45 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+        <div role="dialog" aria-modal="true" aria-labelledby="retire-title" className="sk-overlay fixed inset-0 z-50 flex items-center justify-center bg-green-950/45 p-4">
+          <div className="sk-dialog w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
             {message && <p role="alert" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{message}</p>}
             <h3 id="retire-title" className="text-lg font-semibold text-green-950">Archive {retiring.name}?</h3>
             <p className="mt-2 text-sm text-green-800/75">This removes the item from the active catalogue. Existing orders and their item names are preserved.</p>

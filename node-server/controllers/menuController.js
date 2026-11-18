@@ -8,9 +8,11 @@ exports.getMenu = async (req, res) => {
     // revalidates availability and prices inside its transaction.
     res.set("Cache-Control", "no-store");
 
+    // Customers need price and availability only. Stock counts and internal
+    // stock-group ids stay on the protected admin endpoints.
     res.json({
       success: true,
-      data: menu
+      data: menu.map(({ stock: _stock, stockGroupId: _stockGroupId, ...item }) => item)
     });
   } catch (err) {
     console.error(err);

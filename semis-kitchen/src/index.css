@@ -34,6 +34,73 @@ body { margin: 0; background: #F6EDD7; }
 .customer-editorial textarea,
 .customer-editorial select { color-scheme: light; }
 
+/* ---------------------------------------------------------
+   Mobile viewport, keyboard and focus-zoom handling.
+   These rules are deliberately outside Tailwind's cascade layers, so they
+   take precedence over utilities such as text-sm without !important.
+--------------------------------------------------------- */
+
+/* iOS Safari zooms into any focused text control under 16px and stays
+   zoomed after blur. Touch screens get 16px controls; labels and other
+   small text keep their size, and pinch-zoom remains available. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]),
+  select,
+  textarea,
+  .sk-ios-date-placeholder {
+    font-size: 16px;
+  }
+}
+
+/* Page roots: the small viewport (browser bars shown) is a stable minimum;
+   100vh is the fallback for browsers without svh. */
+.sk-page-min {
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+/* Full-screen overlays follow the currently usable viewport: browser bars
+   shown or hidden, and (with interactive-widget=resizes-content) the
+   on-screen keyboard on Android. */
+.sk-overlay {
+  height: 100vh;
+  height: 100dvh;
+  bottom: auto;
+  overscroll-behavior: contain;
+}
+
+/* A centred dialog never grows past its overlay; its own content scrolls. */
+.sk-dialog {
+  max-height: 100%;
+}
+
+/* Bottom action areas clear the home indicator if the page is ever shown
+   edge-to-edge. The inset is 0 without viewport-fit=cover (current setup). */
+.sk-safe-bottom {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}
+
+/* Larger tap area for small icon buttons without changing how they look. */
+.sk-hit::after {
+  content: "";
+  position: absolute;
+  inset: -0.5rem;
+}
+
+/* Delivery map: never take most of a short or landscape screen. */
+.sk-map,
+.sk-map-fallback {
+  height: 16rem;
+  height: clamp(10rem, 38dvh, 16rem);
+}
+
+@media (min-width: 768px) {
+  .sk-map,
+  .sk-map-fallback {
+    height: clamp(10rem, 38dvh, 18rem);
+  }
+}
+
 
 /* ---------------------------------------------------------
    Admin primary navigation — click-only off-canvas menu
@@ -41,6 +108,7 @@ body { margin: 0; background: #F6EDD7; }
 --------------------------------------------------------- */
 .admin-dashboard-shell {
   min-height: 100vh;
+  min-height: 100svh;
 }
 
 .admin-dashboard-content {
@@ -53,18 +121,26 @@ body { margin: 0; background: #F6EDD7; }
   inset: 0 auto 0 0;
   z-index: 50;
   width: var(--admin-nav-open);
+  /* Follow the visible viewport so the footer never sits behind browser bars. */
+  height: 100vh;
+  height: 100dvh;
+  bottom: auto;
   overflow: hidden;
   background: #fbbf24;
   color: #052e16;
   border-right: 1px solid rgb(5 46 22 / 0.2);
   box-shadow: 18px 0 42px rgb(5 46 22 / 0.18);
   transform: translateX(-102%);
-  transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* Hidden after the slide-out, so closed links cannot receive focus. */
+  visibility: hidden;
+  transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 420ms;
 }
 
 /* Deliberately click-only: hover/focus never opens this menu. */
 .admin-primary-nav.is-open {
   transform: translateX(0);
+  visibility: visible;
+  transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s;
 }
 
 .admin-primary-nav__panel {
@@ -72,10 +148,11 @@ body { margin: 0; background: #F6EDD7; }
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 1.35rem 1.35rem 1.25rem;
+  padding: 1.35rem 1.35rem max(1.25rem, env(safe-area-inset-bottom));
 }
 
 .admin-primary-nav__heading {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -119,13 +196,28 @@ body { margin: 0; background: #F6EDD7; }
   background: rgb(255 255 255 / 0.36);
 }
 
+/* Links scroll when they cannot all fit (short or landscape screens). The
+   auto margins centre them when there is room without clipping the first
+   link when there is not (unlike justify-content: center). */
 .admin-primary-nav__links {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.1rem;
-  padding: 1.4rem 0;
+  padding: 1.4rem 0 1.4rem 0.6rem;
+  margin-left: -0.6rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.admin-primary-nav__links > :first-child {
+  margin-top: auto;
+}
+
+.admin-primary-nav__links > :last-child {
+  margin-bottom: auto;
 }
 
 .admin-primary-nav__item {
@@ -187,6 +279,7 @@ body { margin: 0; background: #F6EDD7; }
 }
 
 .admin-primary-nav__footer {
+  flex: 0 0 auto;
   padding-top: 1rem;
   border-top: 1px solid rgb(5 46 22 / 0.22);
 }
@@ -271,6 +364,36 @@ body { margin: 0; background: #F6EDD7; }
 
   .admin-primary-nav__item {
     font-size: clamp(2.25rem, 11vw, 3.25rem);
+  }
+}
+
+/* Short screens (phones in landscape): smaller links and spacing so Sign out
+   stays visible; the link list still scrolls if needed. */
+@media (max-height: 560px) {
+  .admin-primary-nav__panel {
+    padding-top: 0.85rem;
+  }
+
+  .admin-primary-nav__heading {
+    padding-bottom: 0.6rem;
+  }
+
+  .admin-primary-nav__links {
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+  }
+
+  .admin-primary-nav__item {
+    font-size: clamp(1.5rem, 7vh, 2.25rem);
+    padding: 0.3rem 0;
+  }
+
+  .admin-primary-nav__footer {
+    padding-top: 0.5rem;
+  }
+
+  .admin-primary-nav__signout {
+    padding: 0.4rem 0;
   }
 }
 
